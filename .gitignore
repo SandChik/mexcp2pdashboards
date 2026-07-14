@@ -1,0 +1,13 @@
+# ── SECRETS & RUNTIME DATA — never commit ──────────────────────────
+# Encrypted API secrets, FTD snapshots, buyer log, audit trail, settings.
+# The backend recreates this directory automatically on first boot.
+backend/data/
+.env
+*.pem
+*.key
+
+# ── Build & deps ───────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+*.log
+.DS_Store
