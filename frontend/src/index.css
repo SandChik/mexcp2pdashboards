@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  body {
+    /* Pure black with a faint cold-blue aurora at the top — futuristic but quiet */
+    background:
+      radial-gradient(1100px 480px at 50% -10%, rgba(32, 80, 255, 0.10), transparent 62%),
+      radial-gradient(700px 380px at 92% 108%, rgba(32, 80, 255, 0.05), transparent 60%),
+      #000000;
+    background-attachment: fixed;
+    color: #f2f5ff;
+    font-family: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Tactile, uniform micro-interactions everywhere without touching components */
+  button {
+    transition: color .15s ease, background-color .15s ease, border-color .15s ease,
+                box-shadow .2s ease, transform .1s ease, opacity .15s ease;
+  }
+  button:active:not(:disabled) { transform: scale(0.97); }
+
+  /* Thin scrollbar, blue on hover */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #151d33; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2050ff88; }
+
+  ::selection { background: #2050ff55; }
+
+  /* Keyboard focus = neon ring */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(32, 80, 255, 0.65), 0 0 14px rgba(32, 80, 255, 0.35);
+    border-radius: 4px;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+  input[type="date"] { color-scheme: dark; }
+}
+
+@layer components {
+  .seg { @apply flex items-center gap-0.5 bg-surface-900 border border-surface-700 rounded-md p-0.5; }
+  .seg-btn { @apply px-2.5 py-1 rounded text-xs font-medium text-surface-200 hover:text-surface-50 transition-colors; }
+  .seg-btn-active { @apply bg-brand-500/15 text-brand-300 shadow-glow-sm; }
+}
+
+@layer utilities {
+  /* Primary CTAs (bg-brand-500) glow on hover — one rule covers the whole app */
+  .bg-brand-500:hover { box-shadow: 0 0 16px rgba(32, 80, 255, 0.45); }
+
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 6px rgba(32, 80, 255, 0.30); }
+    50%      { box-shadow: 0 0 18px rgba(32, 80, 255, 0.55); }
+  }
+  .animate-pulse-glow { animation: pulse-glow 2.4s ease-in-out infinite; }
+}

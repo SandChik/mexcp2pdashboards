@@ -1,0 +1,25 @@
+# Systemd unit — copy to /etc/systemd/system/mexc-dashboard.service
+[Unit]
+Description=MEXC P2P Dashboard (backend + built frontend + 24/7 capture worker)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mexc
+WorkingDirectory=/opt/mexc-dashboard/backend
+Environment=PORT=3001
+# 0.0.0.0 is SAFE ONLY because ufw blocks everything except the Tailscale
+# interface (see DEPLOY.md). Never open port 3001 on the public firewall.
+Environment=HOST=0.0.0.0
+# Environment=CAPTURE_WORKER=0        # uncomment to disable the 24/7 worker
+# Environment=CAPTURE_INTERVAL_MS=20000
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
