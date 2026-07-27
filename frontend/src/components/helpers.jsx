@@ -31,12 +31,14 @@ export function getAdPaymentLabel(ad) {
 
 // ─── Order States ─────────────────────────────────────────────────────────────
 export const ORDER_STATES = {
-  0: { label: 'Belum bayar', color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
+  // Only three colours, on purpose: more than that and the list stops being
+  // scannable. Blue = still running, green = finished, red = failed.
+  0: { label: 'Belum bayar', color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
   1: { label: 'Sudah bayar', color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
-  2: { label: 'Menunggu',    color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
-  3: { label: 'Diproses',    color: 'text-cyan-400 bg-cyan-500/10',   group: 'active',    accent: 'border-l-cyan-400' },
+  2: { label: 'Menunggu',    color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
+  3: { label: 'Diproses',    color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
   4: { label: 'Selesai',     color: 'text-buy bg-buy/10',             group: 'done',      accent: 'border-l-buy' },
-  5: { label: 'Dibatalkan',  color: 'text-surface-200 bg-surface-700', group: 'cancelled', accent: 'border-l-surface-600' },
+  5: { label: 'Dibatalkan',  color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
   6: { label: 'Invalid',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
   7: { label: 'Ditolak',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
   8: { label: 'Timeout',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },

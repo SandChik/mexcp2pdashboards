@@ -67,72 +67,66 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * One soft bell note.
- * Fundamental + a quiet, slightly detuned octave partial gives a glassy
- * marimba tone. The lowpass removes any residual edge so it stays "adem"
- * even at higher pitches.
+ * One short, crisp UI tone.
+ *
+ * Tuned for the character of a modern phone unlock confirmation: very short
+ * (~0.15-0.3s), soft attack with no click, fast decay, glassy rather than
+ * bell-like. Two of these in quick succession read as a single "event" the
+ * ear can identify without being intrusive.
  */
-function note(freq, { at = 0, dur = 0.9, gain = 1 } = {}) {
+function note(freq, { at = 0, dur = 0.22, gain = 1 } = {}) {
   const c = audio();
   if (!c) return;
   const t0 = c.currentTime + at;
 
   const filter = c.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.value = 2600;
-  filter.Q.value = 0.6;
+  filter.frequency.value = 5200;   // keeps it bright but never sharp
+  filter.Q.value = 0.4;
 
   const env = c.createGain();
-  // Master is deliberately low: 0.5 on the slider ≈ 0.11 linear gain.
-  const peak = Math.max(0.0001, 0.22 * prefs.volume * gain);
+  const peak = Math.max(0.0001, 0.16 * prefs.volume * gain);
   env.gain.setValueAtTime(0.0001, t0);
-  env.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);        // soft attack, no click
-  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);        // natural decay
+  env.gain.exponentialRampToValueAtTime(peak, t0 + 0.006);  // crisp, click-free
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);  // quick fade
 
   filter.connect(env);
   env.connect(c.destination);
 
-  // Fundamental
   const o1 = c.createOscillator();
   o1.type = 'sine';
   o1.frequency.value = freq;
   o1.connect(filter);
-  o1.start(t0); o1.stop(t0 + dur + 0.05);
+  o1.start(t0); o1.stop(t0 + dur + 0.03);
 
-  // Quiet octave partial (the "shimmer" that makes it read as a bell, not a beep)
+  // Faint upper partial — the bit that makes it read as "glassy" rather than
+  // as a plain beep. Decays even faster than the fundamental.
   const o2 = c.createOscillator();
   const g2 = c.createGain();
-  g2.gain.value = 0.18;
-  o2.type = 'sine';
-  o2.frequency.value = freq * 2.01; // slight detune = gentle movement
+  g2.gain.value = 0.12;
+  o2.type = 'triangle';
+  o2.frequency.value = freq * 3.02;
   o2.connect(g2); g2.connect(filter);
-  o2.start(t0); o2.stop(t0 + dur * 0.6);
+  o2.start(t0); o2.stop(t0 + dur * 0.4);
 }
 
-// Note frequencies (equal temperament)
-const N = { D4: 293.66, F4: 349.23, G4: 392.0, A4: 440.0, C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99, A5: 880.0, C6: 1046.5, E6: 1318.5 };
+const N = { E4: 329.63, G4: 392.0, A4: 440.0, D5: 587.33, F5: 698.46, A5: 880.0, C6: 1046.5, E6: 1318.5, G6: 1568.0 };
 
 /**
- * Motifs — each event has its own shape so it's identifiable by ear:
- *   rising  = something needs you
- *   falling = something finished / closed
- *   single  = minor event
+ * Motifs — all in the same short two-tone family so the app sounds coherent,
+ * but each with its own interval and register so you can tell them apart:
+ *   rising  = needs you
+ *   falling = finished
+ *   flat    = attention
  */
 const MOTIFS = {
-  // Order baru masuk — warm rising fifth, inviting
-  newOrder:  () => { note(N.C5, { dur: 0.8 }); note(N.G5, { at: 0.14, dur: 1.1 }); },
-  // Buyer sudah bayar — rising fourth, brighter: butuh aksi Anda (release)
-  paid:      () => { note(N.G5, { dur: 0.7 }); note(N.C6, { at: 0.13, dur: 1.0, gain: 1.05 }); },
-  // Order selesai — triad turun yang "menutup", terasa tuntas
-  done:      () => { note(N.G5, { dur: 0.6 }); note(N.E5, { at: 0.12, dur: 0.7 }); note(N.C5, { at: 0.24, dur: 1.2 }); },
-  // Batal / timeout / ditolak — turun pelan di register rendah, tidak bikin kaget
-  cancelled: () => { note(N.A4, { dur: 0.7, gain: 0.85 }); note(N.F4, { at: 0.15, dur: 1.0, gain: 0.85 }); },
-  // Pesan chat baru — satu bel lembut
-  message:   () => { note(N.E6, { dur: 0.7, gain: 0.7 }); },
-  // Nama KYC duplikat — dua denyut hangat, tegas tapi tidak melengking
-  duplicate: () => { note(N.A4, { dur: 0.45 }); note(N.A4, { at: 0.22, dur: 0.8 }); note(N.D5, { at: 0.22, dur: 0.8, gain: 0.5 }); },
-  // Gagal sync / error — dua nada rendah, tenang
-  error:     () => { note(N.D4, { dur: 0.5, gain: 0.8 }); note(N.D4, { at: 0.18, dur: 0.8, gain: 0.6 }); },
+  newOrder:  () => { note(N.A5, { dur: 0.14 }); note(N.E6, { at: 0.075, dur: 0.26 }); },
+  paid:      () => { note(N.C6, { dur: 0.14 }); note(N.G6, { at: 0.075, dur: 0.26, gain: 1.05 }); },
+  done:      () => { note(N.E6, { dur: 0.14 }); note(N.A5, { at: 0.08, dur: 0.30 }); },
+  cancelled: () => { note(N.D5, { dur: 0.16, gain: 0.85 }); note(N.A4, { at: 0.09, dur: 0.30, gain: 0.85 }); },
+  message:   () => { note(N.E6, { dur: 0.18, gain: 0.75 }); },
+  duplicate: () => { note(N.F5, { dur: 0.12 }); note(N.F5, { at: 0.14, dur: 0.26 }); },
+  error:     () => { note(N.G4, { dur: 0.16, gain: 0.8 }); note(N.E4, { at: 0.1, dur: 0.28, gain: 0.7 }); },
 };
 
 /** Play an event sound, respecting mute + per-event toggles. */

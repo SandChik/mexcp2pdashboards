@@ -17,6 +17,7 @@ const POLL_MS = 15000;
 const WINDOW_MS = 2 * 86400000; // actionable orders are always recent
 
 let items = [];
+let activeByMerchant = {};   // merchantId -> count of orders still running (state 0..3)
 let merchants = [];
 let listeners = [];
 let timer = null;
@@ -28,6 +29,9 @@ const emit = () => listeners.forEach(fn => { try { fn(); } catch { /* */ } });
 
 export function getQueue() { return items; }
 export function getQueueCount() { return items.length; }
+/** Running-order count per merchant — lets the dashboard badge every merchant
+ *  chip so you can see where the activity is without opening each panel. */
+export function getActiveByMerchant() { return activeByMerchant; }
 export function getQueueMeta() { return { lastError, lastSync, merchants }; }
 
 export async function refreshQueue() {
@@ -44,16 +48,23 @@ export async function refreshQueue() {
         const r = await ordersApi.market(m.id, { startTime: now - WINDOW_MS, endTime: now });
         const raw = r.data;
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-        return list
-          .map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name }))
-          .filter(o => actionFor(o));
+        const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name }));
+        return {
+          mid: m.id,
+          actionable: norm.filter(o => actionFor(o)),
+          active: norm.filter(o => [0, 1, 2, 3].includes(o._state)).length,
+        };
       } catch { return null; } // one merchant failing must not blank the queue
     }));
 
     if (results.every(r => r === null)) { lastError = true; emit(); return; }
     lastError = results.some(r => r === null);
 
-    items = results.flat().filter(Boolean).sort((a, b) => {
+    const nextActive = { ...activeByMerchant };
+    results.forEach(r => { if (r) nextActive[r.mid] = r.active; });
+    activeByMerchant = nextActive;
+
+    items = results.filter(Boolean).flatMap(r => r.actionable).sort((a, b) => {
       // Soonest deadline first; orders without a deadline sink to the bottom.
       const da = a.payTimeLimit || Infinity, db = b.payTimeLimit || Infinity;
       if (da !== db) return da - db;

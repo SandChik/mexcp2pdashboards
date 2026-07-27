@@ -6,7 +6,7 @@ import { subscribeQueue, getQueueCount } from '../actionQueue';
 
 const NAV = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard', short: 'Home'   },
-  { to: '/queue',    icon: Zap,             label: 'Butuh aksi', short: 'Aksi', badge: true },
+  { to: '/queue',    icon: Zap,             label: 'Antrian',   short: 'Antrian', badge: true },
   { to: '/uu',       icon: Users,           label: 'Unique Users', short: 'UU'  },
   { to: '/ftd',      icon: UserPlus,        label: 'FTD',       short: 'FTD'    },
   { to: '/buyers',   icon: BookUser,        label: 'Catatan Buyer', short: 'Buyer' },

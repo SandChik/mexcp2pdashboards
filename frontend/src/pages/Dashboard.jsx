@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { merchantApi } from '../api';
 import MerchantPanel from '../components/MerchantPanel';
 import Layout from '../components/Layout';
-import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X } from 'lucide-react';
+import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X, Bell } from 'lucide-react';
 import NotificationBell from '../components/NotificationBell';
+import { subscribeQueue, getActiveByMerchant } from '../actionQueue';
 import { useNavigate } from 'react-router-dom';
 
 const DAY = 86400000;
@@ -29,8 +30,39 @@ export default function Dashboard() {
   const [showDate, setShowDate] = useState(false);
   const [dateInput, setDateInput] = useState(() => ({ from: toDateStr(todayStart()), to: toDateStr(Date.now()) }));
   const [activeMerchant, setActiveMerchant] = useState(0); // mobile: which panel is shown
+  const [alert, setAlert] = useState(null);   // { index, name, delta } — activity on a panel you can't see
   const navigate = useNavigate();
   const dateRef = useRef(null);
+  const prevActive = useRef(null);
+  const activeMerchantRef = useRef(0);
+  useEffect(() => { activeMerchantRef.current = activeMerchant; }, [activeMerchant]);
+
+  // Running-order counts for every merchant, shared with the queue page.
+  const [, tickQ] = useState(0);
+  useEffect(() => subscribeQueue(() => tickQ(t => t + 1)), []);
+  const activeCounts = getActiveByMerchant();
+
+  // When a merchant that is NOT on screen gains a running order, say so — on a
+  // phone only one panel is visible, so otherwise you'd have to open each one.
+  useEffect(() => {
+    if (merchants.length === 0) return;
+    const prev = prevActive.current;
+    if (prev) {
+      merchants.slice(0, 3).forEach((m, i) => {
+        const before = prev[m.id] ?? 0, after = activeCounts[m.id] ?? 0;
+        if (after > before && i !== activeMerchantRef.current) {
+          setAlert({ index: i, name: m.name, delta: after - before });
+        }
+      });
+    }
+    prevActive.current = { ...activeCounts };
+  }, [activeCounts, merchants]);
+
+  useEffect(() => {
+    if (!alert) return;
+    const t = setTimeout(() => setAlert(null), 15000);
+    return () => clearTimeout(t);
+  }, [alert]);
 
   const load = useCallback(async () => {
     try { const r = await merchantApi.list(); setMerchants(r.data); }
@@ -170,16 +202,39 @@ export default function Dashboard() {
           {/* Mobile: merchant switcher — one panel at a time beats a squashed grid */}
           {merchants.length > 1 && (
             <div className="lg:hidden flex gap-1.5 px-3 pb-2 overflow-x-auto no-scrollbar">
-              {merchants.slice(0, 3).map((m, i) => (
-                <button key={m.id} onClick={() => setActiveMerchant(i)}
-                  className={`flex-shrink-0 text-xs font-medium rounded-lg px-3 py-1.5 border transition-all ${
-                    activeMerchant === i
-                      ? 'bg-brand-500/15 text-brand-300 border-brand-500/40 shadow-glow-sm'
-                      : 'text-surface-300 border-surface-700 hover:text-surface-50'}`}>
-                  {m.name}
-                </button>
-              ))}
+              {merchants.slice(0, 3).map((m, i) => {
+                const n = activeCounts[m.id] ?? 0;
+                return (
+                  <button key={m.id} onClick={() => { setActiveMerchant(i); if (alert?.index === i) setAlert(null); }}
+                    className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium rounded-lg px-3 py-1.5 border transition-all ${
+                      activeMerchant === i
+                        ? 'bg-brand-500/15 text-brand-300 border-brand-500/40 shadow-glow-sm'
+                        : n > 0
+                          ? 'text-surface-100 border-brand-500/30 hover:text-surface-50'
+                          : 'text-surface-300 border-surface-700 hover:text-surface-50'}`}>
+                    {m.name}
+                    {n > 0 && (
+                      <span className="bg-brand-500 text-white text-[10px] font-semibold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center">
+                        {n > 99 ? '99+' : n}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+          )}
+
+          {/* Activity on a panel you can't currently see */}
+          {alert && (
+            <button onClick={() => { setActiveMerchant(alert.index); setAlert(null); }}
+              className="lg:hidden w-full flex items-center gap-2 px-3 py-2 bg-brand-500/15 border-t border-brand-500/30 text-left animate-slide-up">
+              <Bell size={13} className="text-brand-300 flex-shrink-0" />
+              <span className="text-xs text-brand-200 flex-1 truncate">
+                {alert.delta} order baru di <b className="font-semibold text-brand-100">{alert.name}</b> — ketuk untuk lihat
+              </span>
+              <X size={14} className="text-surface-300 flex-shrink-0"
+                onClick={e => { e.stopPropagation(); setAlert(null); }} />
+            </button>
           )}
         </header>
 

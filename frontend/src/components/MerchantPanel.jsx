@@ -142,9 +142,10 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   }, [merchant.id]);
   useEffect(() => { if (buyerLog) loadNameIndex(); }, [buyerLog, loadNameIndex]);
 
-  // Resolve real names (cached server-side) only for orders we haven't seen yet
+  // Resolve real names (cached server-side) for every order — the KYC name is
+  // shown on each row now, not just when the buyer log is on.
   useEffect(() => {
-    if (!buyerLog || orders.length === 0) return;
+    if (orders.length === 0) return;
     const missing = orders.map(o => o.advOrderNo).filter(no => no && !(no in nameMapRef.current));
     if (missing.length === 0) return;
     let cancelled = false;
@@ -154,7 +155,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       setNameMap(prev => { const next = { ...prev, ...map }; nameMapRef.current = next; return next; });
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [orders, buyerLog, merchant.id]);
+  }, [orders, merchant.id]);
 
   // Load remembered pause state for this merchant
   useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
@@ -343,38 +344,6 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     try { await merchantApi.serviceSwitch(merchant.id, open); setServiceOpen(open); toast.success(open ? 'Merchant open' : 'Merchant closed'); }
     catch { toast.error('Switch failed'); }
     setMenuOpen(false);
-  }
-
-  // Announce a newly-detected duplicate KYC name once (sound + toast), so you
-  // catch it even if you're looking at another panel.
-  const dupAnnounced = useRef(new Set());
-  useEffect(() => {
-    if (!buyerLog) return;
-    orders.forEach(o => {
-      const d = dupInfo(o.advOrderNo);
-      if (d && !dupAnnounced.current.has(o.advOrderNo)) {
-        dupAnnounced.current.add(o.advOrderNo);
-        playSound('duplicate');
-        toast(`Nama sama: ${d.name} (${d.count}\u00d7) — ${merchant.name}`, { duration: 7000, icon: '\u26a0\ufe0f' });
-        addNotif('Nama duplikat', `${merchant.name} — ${d.name} tercatat ${d.count}\u00d7`);
-      }
-    });
-  }, [orders, nameMap, logNameIndex, buyerLog]); // eslint-disable-line
-
-  // Inline action straight from the list — same confirmation dialog as the
-  // modal, minus opening and closing it.
-  async function rowAction(order, e) {
-    e?.stopPropagation();
-    if (rowBusy) return;
-    setRowBusy(order.advOrderNo);
-    try {
-      const ok = await runAction(merchant.id, order);
-      if (ok) {
-        setRowDone(order.advOrderNo);
-        setTimeout(() => setRowDone(null), 1200);
-        doFetch(false);
-      }
-    } finally { setRowBusy(null); }
   }
 
   async function toggleBuyerLog() {
@@ -645,6 +614,11 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                         )}
                       </div>
                       <p className="text-xs text-surface-200 truncate">{order.userInfo?.nickName || 'Unknown'}</p>
+                      {nameMap[order.advOrderNo]?.realName && (
+                        <p className={`text-xs truncate ${dup ? 'text-sell font-medium' : 'text-surface-100'}`}>
+                          {nameMap[order.advOrderNo].realName}
+                        </p>
+                      )}
                       <p className="text-[11px] text-surface-300/70 font-mono mt-0.5">{formatTime(order.createTime)}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
