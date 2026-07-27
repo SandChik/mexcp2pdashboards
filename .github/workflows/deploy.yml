@@ -27,6 +27,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Gate: a deploy that would blank the dashboard must never reach the VPS.
+      # `no-undef` alone catches the whole class of "a refactor deleted a
+      # function that is still called" — the failure mode that shipped twice.
+      - name: Lint + build (deploy is blocked if this fails)
+        run: |
+          cd frontend
+          npm ci
+          npm run lint
+          npm run build
+
       - name: Load SSH key
         run: |
           mkdir -p ~/.ssh

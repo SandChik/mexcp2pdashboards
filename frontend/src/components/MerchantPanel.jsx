@@ -77,6 +77,47 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   // sender, always on, unaffected by a suspended phone tab. Sending from the
   // browser as well would put two senders back in play.
 
+  useEffect(() => { rangeRef.current = dateRange; }, [dateRange]);
+
+  // Per-merchant settings: buyer-log toggle + auto-reply on/off. The rules
+  // themselves are read by the backend worker now, not here.
+  useEffect(() => { merchantApi.getSettings(merchant.id).then(r => {
+    setBuyerLog(!!r.data?.buyerLog);
+    setAutoReplyEnabled(r.data?.autoReplyEnabled !== false); // default ON
+  }).catch(() => {}); }, [merchant.id]);
+
+  // Permanent buyer-name index, source of the duplicate-KYC alert
+  const loadNameIndex = useCallback(async () => {
+    try { const r = await registryApi.list(merchant.id); setLogNameIndex(r.data?.nameIndex || {}); }
+    catch { /* keep last */ }
+  }, [merchant.id]);
+  useEffect(() => { if (buyerLog) loadNameIndex(); }, [buyerLog, loadNameIndex]);
+
+  // Resolve KYC names (cached server-side) for every order — shown on each row.
+  useEffect(() => {
+    if (orders.length === 0) return;
+    // Active orders first: their name matters for the duplicate alert BEFORE
+    // release. Capped so a 150-order range can't dump 150 fetches into the gate.
+    const pending = orders.filter(o => o.advOrderNo && !(o.advOrderNo in nameMapRef.current));
+    const active = pending.filter(o => [0, 1, 2, 3].includes(o._state));
+    const rest = pending.filter(o => ![0, 1, 2, 3].includes(o._state));
+    const missing = active.concat(rest).slice(0, 30).map(o => o.advOrderNo);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    ordersApi.memberIds(merchant.id, missing).then(r => {
+      if (cancelled) return;
+      const map = r.data?.map || {};
+      setNameMap(prev => { const next = { ...prev, ...map }; nameMapRef.current = next; return next; });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [orders, merchant.id]);
+
+  // Remembered pause state for this merchant
+  useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
+
+  // 1s tick driving the countdown badges
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
   const doFetch = useCallback(async (quiet = false, quick = false) => {
     if (busyRef.current) return;
     busyRef.current = true;

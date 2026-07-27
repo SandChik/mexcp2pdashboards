@@ -7,8 +7,8 @@ APP=/opt/mexc-dashboard
 echo "==> deps (backend, prod only)"
 cd "$APP/backend" && npm ci --omit=dev
 
-echo "==> build frontend"
-cd "$APP/frontend" && npm ci && npm run build
+echo "==> lint + build frontend"
+cd "$APP/frontend" && npm ci && npm run lint && npm run build
 
 echo "==> restart service"
 sudo /usr/bin/systemctl restart mexc-dashboard
