@@ -1,24 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ordersApi, adsApi, merchantApi, chatApi, registryApi } from '../api';
+import { ordersApi, adsApi, merchantApi, chatApi, registryApi, autoReplyApi } from '../api';
 import {
   OrderStateBadge, SideBadge, AdStatusBadge, formatTime, formatAmount, formatCompact,
-  playNewOrderSound, playNewMessageSound, playStateChangeSound,
   ORDER_STATES, normalizeState,
 } from './helpers';
+import { playSound, soundForState } from '../sounds';
+import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
 import { addNotif } from '../notifications';
 import OrderDetailModal from './OrderDetailModal';
 import AdModal from './AdModal';
 import {
-  Power, MessageSquare, ToggleLeft, ToggleRight, RefreshCw, MoreVertical, Pencil, Clock, AlertTriangle, Pause, Play, UserX,
+  Power, MessageSquare, ToggleLeft, ToggleRight, RefreshCw, MoreVertical, Pencil, Clock, AlertTriangle, Pause, Play, UserX, Coins, CheckCircle2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const ORDER_FILTERS = [
-  { key: 'all',       label: 'All',    states: null },
-  { key: 'active',    label: 'Active', states: [0, 1, 2, 3] },
-  { key: 'done',      label: 'Done',   states: [4] },
-  { key: 'cancelled', label: 'Cancel', states: [5, 6, 7, 8] },
+  { key: 'all',       label: 'Semua',  states: null },
+  { key: 'active',    label: 'Aktif',  states: [0, 1, 2, 3] },
+  { key: 'done',      label: 'Selesai',states: [4] },
+  { key: 'cancelled', label: 'Batal',  states: [5, 6, 7, 8] },
 ];
 
 function fmtRemaining(ms) {
@@ -36,6 +37,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const [serviceOpen, setServiceOpen] = useState(true);
   const [lastSync, setLastSync]       = useState(null);
   const [syncError, setSyncError]     = useState(false);
+  const syncErrorRef = useRef(false);
   const [now, setNow]                 = useState(Date.now());
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [openChatOrder, setOpenChatOrder] = useState(null);
@@ -49,6 +51,8 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const [menuOpen, setMenuOpen]       = useState(false);
   const [pausedAds, setPausedAds]     = useState([]);
   const [busyTrading, setBusyTrading] = useState(false);
+  const [rowBusy, setRowBusy]         = useState(null); // advOrderNo mid-action
+  const [rowDone, setRowDone]         = useState(null); // advOrderNo that just succeeded (green flash)
   const [buyerLog, setBuyerLog]       = useState(false); // permanent buyer log + duplicate-name alert
   const buyerLogRef = useRef(false);
   useEffect(() => { buyerLogRef.current = buyerLog; }, [buyerLog]);
@@ -77,7 +81,6 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     const text = rule.message;
     if (!text || !text.trim()) return;
     const sk = `${o.advOrderNo}:${rule.id}`;
-    if (autoSentRef.current.has(sk)) return;
     autoSentRef.current.add(sk); persistAutoSent();
     try {
       const cr = await chatApi.getConversation(merchant.id, o.advOrderNo);
@@ -87,14 +90,36 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       await chatApi.send(merchant.id, cid, text);
       addNotif('Auto-reply', `${merchant.name} — ${o.userInfo?.nickName || 'buyer'}: ${text.slice(0, 45)}${text.length > 45 ? '…' : ''}`);
     } catch (e) {
+      // Hand the claim back so a later poll can retry — otherwise a transient
+      // network error would silently swallow the message forever.
       autoSentRef.current.delete(sk); persistAutoSent();
+      autoReplyApi.release(merchant.id, o.advOrderNo, [rule.id]).catch(() => {});
       addNotif('Auto-reply failed', `${merchant.name} — ${o.userInfo?.nickName || 'buyer'}: ${e?.response?.data?.error || e?.message || 'send error'}`);
     }
   }
 
   // Send multiple matching rules one-by-one (in order) so they don't collide.
+  //
+  // The local ledger (localStorage) is only a fast path — it is per browser, so
+  // a phone and a laptop each thought they were first and both sent. The server
+  // grants every (order, rule) exactly once across all devices; we send only
+  // what it grants.
   async function autoSendSequential(o, rules) {
-    for (const rule of rules) {
+    let granted;
+    try {
+      const r = await autoReplyApi.claim(merchant.id, o.advOrderNo, rules.map(x => x.id));
+      const ok = new Set(r.data?.granted || []);
+      granted = rules.filter(x => ok.has(x.id));
+      // Remember what the server refused so we stop re-asking every poll.
+      const refused = rules.filter(x => !ok.has(x.id));
+      if (refused.length) {
+        refused.forEach(x => autoSentRef.current.add(`${o.advOrderNo}:${x.id}`));
+        persistAutoSent();
+      }
+    } catch {
+      return; // Can't verify → stay silent. A missed greeting beats a double one.
+    }
+    for (const rule of granted) {
       await autoSend(o, rule);
       await new Promise(res => setTimeout(res, 900));
     }
@@ -159,13 +184,14 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           const ps = prevStates.current[o.advOrderNo];
           const pu = prevUnread.current[o.advOrderNo];
           if (ps !== undefined && ps !== o._state) {
-            playStateChangeSound();
+            const ev = soundForState(o._state); // paid / done / cancelled — silent for intermediate states
+            if (ev) playSound(ev);
             const sc = `${o.userInfo?.nickName || 'Order'}: ${ORDER_STATES[ps]?.label || ps} → ${ORDER_STATES[o._state]?.label || o._state}`;
             toast(sc, { duration: 5000 });
             addNotif('Order', `${merchant.name} — ${sc}`);
           }
           if (pu !== undefined && (o.unreadCount || 0) > pu) {
-            playNewMessageSound();
+            playSound('message');
             toast(`${o.userInfo?.nickName || 'Buyer'}: new message`, { duration: 3000 });
             addNotif('Message', `${merchant.name} — ${o.userInfo?.nickName || 'Buyer'}: new message`);
           }
@@ -190,16 +216,19 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           }
         });
         Object.values(prevStates.current).forEach(s => { if ([0, 1, 2, 3].includes(s)) prevActive++; });
-        if (newActive > prevActive) { playNewOrderSound(); toast.success(`New order — ${merchant.name}`, { duration: 4000 }); }
+        if (newActive > prevActive) { playSound('newOrder'); toast.success(`New order — ${merchant.name}`, { duration: 4000 }); }
       }
 
       const ns = {}, nu = {};
       normalized.forEach(o => { ns[o.advOrderNo] = o._state; nu[o.advOrderNo] = o.unreadCount || 0; });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
-      setOrders(normalized); setLastSync(Date.now()); setSyncError(false);
+      setOrders(normalized); setLastSync(Date.now()); setSyncError(false); syncErrorRef.current = false;
     } catch (e) {
+      // Sound only on the transition into an error state, not every 5s poll.
+      if (!syncErrorRef.current) playSound('error');
+      syncErrorRef.current = true;
       setSyncError(true);
-      if (!quiet) toast.error(`Couldn't load orders for ${merchant.name}`);
+      if (!quiet) toast.error(`Gagal memuat order — ${merchant.name}. Cek koneksi atau API key.`);
     } finally {
       setLoading(false); setRefreshing(false); busyRef.current = false;
     }
@@ -314,6 +343,38 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     try { await merchantApi.serviceSwitch(merchant.id, open); setServiceOpen(open); toast.success(open ? 'Merchant open' : 'Merchant closed'); }
     catch { toast.error('Switch failed'); }
     setMenuOpen(false);
+  }
+
+  // Announce a newly-detected duplicate KYC name once (sound + toast), so you
+  // catch it even if you're looking at another panel.
+  const dupAnnounced = useRef(new Set());
+  useEffect(() => {
+    if (!buyerLog) return;
+    orders.forEach(o => {
+      const d = dupInfo(o.advOrderNo);
+      if (d && !dupAnnounced.current.has(o.advOrderNo)) {
+        dupAnnounced.current.add(o.advOrderNo);
+        playSound('duplicate');
+        toast(`Nama sama: ${d.name} (${d.count}\u00d7) — ${merchant.name}`, { duration: 7000, icon: '\u26a0\ufe0f' });
+        addNotif('Nama duplikat', `${merchant.name} — ${d.name} tercatat ${d.count}\u00d7`);
+      }
+    });
+  }, [orders, nameMap, logNameIndex, buyerLog]); // eslint-disable-line
+
+  // Inline action straight from the list — same confirmation dialog as the
+  // modal, minus opening and closing it.
+  async function rowAction(order, e) {
+    e?.stopPropagation();
+    if (rowBusy) return;
+    setRowBusy(order.advOrderNo);
+    try {
+      const ok = await runAction(merchant.id, order);
+      if (ok) {
+        setRowDone(order.advOrderNo);
+        setTimeout(() => setRowDone(null), 1200);
+        doFetch(false);
+      }
+    } finally { setRowBusy(null); }
   }
 
   async function toggleBuyerLog() {
@@ -434,20 +495,20 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     } finally { setBusyTrading(false); }
   }
 
-  const syncLabel = syncError ? 'sync error' : lastSync ? `synced ${new Date(lastSync).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : '';
+  const syncLabel = syncError ? 'gagal sync' : lastSync ? `sync ${new Date(lastSync).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : '';
 
   return (
-    <div className="bg-surface-800 border border-surface-700 rounded-lg flex flex-col h-full overflow-hidden">
+    <div className="card flex flex-col h-full overflow-hidden">
 
       {/* Header */}
-      <div className="px-3.5 pt-3 pb-3 border-b border-surface-700">
+      <div className="px-3 sm:px-3.5 pt-3 pb-3 border-b border-surface-700">
         <div className="flex items-center justify-between h-6">
           <div className="flex items-center gap-2 min-w-0">
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${serviceOpen ? 'bg-buy' : 'bg-sell'}`} />
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${serviceOpen ? 'bg-buy shadow-glow-buy animate-pulse' : 'bg-sell'}`} />
             <span className="font-semibold text-surface-50 text-sm truncate">{merchant.name}</span>
             {refreshing && <RefreshCw size={11} className="text-brand-400 animate-spin flex-shrink-0" />}
-            {unread > 0 && <span className="bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{unread} unread</span>}
-            {pausedAds.length > 0 && <span className="bg-warning/15 text-warning text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">paused {pausedAds.length}</span>}
+            {unread > 0 && <span className="bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{unread} belum dibaca</span>}
+            {pausedAds.length > 0 && <span className="bg-warning/15 text-warning text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{pausedAds.length} dijeda</span>}
           </div>
           <div className="relative flex-shrink-0" ref={menuRef}>
             <button onClick={() => setMenuOpen(m => !m)}
@@ -489,9 +550,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
 
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-3 text-xs text-surface-300">
-            <span><b className={`font-semibold ${activeOrders.length ? 'text-brand-400' : 'text-surface-50'}`}>{activeOrders.length}</b> active</span>
-            <span><b className="font-semibold text-surface-50">{loading ? '·' : orders.length}</b> orders</span>
-            <span><b className="font-semibold text-surface-50">{liveAds.length}</b> live ads</span>
+            <span><b className={`font-semibold ${activeOrders.length ? 'text-brand-300' : 'text-surface-50'}`}>{activeOrders.length}</b> aktif</span>
+            <span><b className="font-semibold text-surface-50">{loading ? '·' : orders.length}</b> order</span>
+            <span><b className="font-semibold text-surface-50">{liveAds.length}</b> iklan live</span>
           </div>
           <span className={`text-[10px] font-mono ${syncError ? 'text-sell' : 'text-surface-300/60'}`}>{syncLabel}</span>
         </div>
@@ -499,29 +560,30 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         {/* Volume — full numbers, fixed-height cells so panels stay aligned */}
         <div className="grid grid-cols-3 gap-2 mt-2.5">
           {[
-            { label: `Buy (${fiatUnit})`, value: formatAmount(volBuy, 0), color: 'text-buy' },
-            { label: `Sell (${fiatUnit})`, value: formatAmount(volSell, 0), color: 'text-sell' },
-            { label: 'Sell (USDT)', value: formatAmount(volSellUsdt, 2), color: 'text-surface-50' },
+            { label: `Buy (${fiatUnit})`, value: formatAmount(volBuy, 0), color: 'text-buy', bar: 'bg-buy' },
+            { label: `Sell (${fiatUnit})`, value: formatAmount(volSell, 0), color: 'text-sell', bar: 'bg-sell' },
+            { label: 'Sell (USDT)', value: formatAmount(volSellUsdt, 2), color: 'text-surface-50', bar: 'bg-brand-400' },
           ].map(s => (
-            <div key={s.label} className="bg-surface-900 border border-surface-700 rounded-md px-2 py-1.5 h-[52px] flex flex-col justify-center overflow-hidden">
-              <p className="text-[10px] uppercase tracking-wide text-surface-300 truncate">{s.label}</p>
-              <p className={`text-[13px] font-mono font-semibold tabular-nums whitespace-nowrap overflow-hidden ${s.color}`}>{s.value}</p>
+            <div key={s.label} className="relative bg-surface-900 border border-surface-700 rounded-lg px-2 py-1.5 h-[54px] flex flex-col justify-center overflow-hidden">
+              <span className={`absolute left-0 top-2 bottom-2 w-[2px] rounded-full ${s.bar}`} />
+              <p className="text-[10px] uppercase tracking-wide text-surface-300 truncate pl-1.5">{s.label}</p>
+              <p className={`text-sm font-mono font-semibold tnum whitespace-nowrap overflow-hidden pl-1.5 ${s.color}`}>{s.value}</p>
             </div>
           ))}
         </div>
       </div>
 
       {/* Tabs + side filter */}
-      <div className="flex items-center gap-1 px-3.5 py-2 border-b border-surface-700">
-        <div className="seg">
-          {['orders', 'ads'].map(t => (
-            <button key={t} onClick={() => setTab(t)} className={`seg-btn capitalize ${tab === t ? 'seg-btn-active' : ''}`}>
-              {t}{t === 'orders' && activeOrders.length > 0 ? ` ${activeOrders.length}` : ''}
+      <div className="flex items-center gap-1 px-3 sm:px-3.5 py-2 border-b border-surface-700 overflow-x-auto no-scrollbar">
+        <div className="seg flex-shrink-0">
+          {[['orders', 'Order'], ['ads', 'Iklan']].map(([t, label]) => (
+            <button key={t} onClick={() => setTab(t)} className={`seg-btn ${tab === t ? 'seg-btn-active' : ''}`}>
+              {label}{t === 'orders' && activeOrders.length > 0 ? ` ${activeOrders.length}` : ''}
             </button>
           ))}
         </div>
-        <div className="flex-1" />
-        <div className="seg">
+        <div className="flex-1 min-w-[8px]" />
+        <div className="seg flex-shrink-0">
           {['ALL', 'BUY', 'SELL'].map(f => {
             const active = (tab === 'orders' ? orderSide : adFilter) === f;
             const tone = active ? (f === 'BUY' ? 'bg-buy/15 text-buy' : f === 'SELL' ? 'bg-sell/15 text-sell' : 'seg-btn-active') : '';
@@ -531,10 +593,10 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       </div>
 
       {tab === 'orders' && (
-        <div className="flex items-center gap-1 px-3.5 py-2 border-b border-surface-700">
+        <div className="flex items-center gap-1 px-3 sm:px-3.5 py-2 border-b border-surface-700 overflow-x-auto no-scrollbar">
           {ORDER_FILTERS.map(f => (
             <button key={f.key} onClick={() => setOrderFilter(f.key)}
-              className={`text-xs px-2 py-1 rounded-md transition-colors ${orderFilter === f.key ? 'bg-surface-700 text-surface-50' : 'text-surface-300 hover:text-surface-50'}`}>
+              className={`tap-sm flex-shrink-0 text-xs px-2.5 py-1 rounded-lg transition-colors ${orderFilter === f.key ? 'bg-surface-700 text-surface-50 ring-1 ring-surface-600' : 'text-surface-300 hover:text-surface-50'}`}>
               {f.label}{filterCounts[f.key] > 0 ? <span className="ml-1 text-surface-300">{filterCounts[f.key]}</span> : ''}
             </button>
           ))}
@@ -544,10 +606,15 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center h-24 text-surface-300"><RefreshCw size={16} className="animate-spin" /></div>
+          <div className="p-3 space-y-2.5">
+            {[0, 1, 2, 3].map(i => <div key={i} className="skeleton h-[68px] w-full" />)}
+          </div>
         ) : tab === 'orders' ? (
           filteredOrders.length === 0 ? (
-            <div className="text-center py-12 text-sm text-surface-300">{orders.length === 0 ? 'No orders in this range.' : `No ${orderFilter} orders.`}</div>
+            <div className="text-center py-12 px-6">
+              <p className="text-sm text-surface-200">{orders.length === 0 ? 'Belum ada order pada rentang ini.' : 'Tidak ada order dengan filter ini.'}</p>
+              <p className="text-xs text-surface-300 mt-1">{orders.length === 0 ? 'Coba ubah rentang tanggal di kanan atas.' : 'Pilih filter lain untuk melihat order yang ada.'}</p>
+            </div>
           ) : filteredOrders.map(order => {
             const amtColor = order.side === 'BUY' ? 'text-buy' : 'text-sell';
             const isActive = [0, 1, 2, 3].includes(order._state);
@@ -556,8 +623,10 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
             const urgent = countdown && remaining < 5 * 60 * 1000;
             const dup = buyerLog ? dupInfo(order.advOrderNo) : null;
             return (
-              <div key={order.advOrderNo} className={`border-b border-surface-700/60 hover:bg-surface-900/60 transition-colors ${dup ? 'border-l-2 border-l-sell bg-sell/[0.04]' : ''}`}>
-                <button onClick={() => setSelectedOrder(order.advOrderNo)} className="w-full px-3.5 py-3 text-left">
+              <div key={order.advOrderNo}
+                className={`border-b border-surface-700/60 hover:bg-surface-900/60 transition-colors border-l-2 ${
+                  dup ? 'border-l-sell bg-sell/[0.05]' : (ORDER_STATES[order._state]?.accent || 'border-l-transparent')}`}>
+                <button onClick={() => setSelectedOrder(order.advOrderNo)} className="w-full px-3 sm:px-3.5 py-3 text-left">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 mb-1.5">
@@ -570,7 +639,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                           </span>
                         )}
                         {countdown && (
-                          <span className={`flex items-center gap-0.5 text-[11px] font-mono rounded px-1.5 py-0.5 ${urgent ? 'bg-sell/15 text-sell' : 'bg-warning/10 text-warning'}`}>
+                          <span className={`flex items-center gap-0.5 text-[11px] font-mono tnum rounded-md px-1.5 py-0.5 ${urgent ? 'bg-sell/15 text-sell animate-pulse-ring' : 'bg-warning/10 text-warning'}`}>
                             {urgent ? <AlertTriangle size={10} /> : <Clock size={10} />}{countdown}
                           </span>
                         )}
@@ -579,16 +648,37 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                       <p className="text-[11px] text-surface-300/70 font-mono mt-0.5">{formatTime(order.createTime)}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <span className={`block text-base font-mono font-semibold ${amtColor}`}>{formatAmount(order.amount, 0)}</span>
+                      <span className={`block text-lg font-mono font-semibold tnum leading-none ${amtColor}`}>{formatAmount(order.amount, 0)}</span>
                       <span className="text-[11px] text-surface-300 font-mono">{order.fiatUnit}</span>
                       {order.tradableQuantity && <span className="block text-xs text-surface-200 font-mono mt-0.5">{formatAmount(order.tradableQuantity, 2)} USDT</span>}
                     </div>
                   </div>
                 </button>
+                {(() => {
+                  const kind = actionFor(order);
+                  if (!kind) return null;
+                  const isBusy = rowBusy === order.advOrderNo;
+                  const justDone = rowDone === order.advOrderNo;
+                  return (
+                    <div className="px-3 sm:px-3.5 pb-2.5 -mt-1">
+                      <button onClick={e => rowAction(order, e)} disabled={!!rowBusy || justDone}
+                        className={`w-full flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg h-9 border transition-all disabled:opacity-50 ${
+                          justDone ? 'bg-buy/20 text-buy border-buy/40'
+                          : kind === 'release'
+                            ? 'bg-buy/10 text-buy border-buy/25 hover:bg-buy/20 hover:shadow-glow-buy'
+                            : 'bg-brand-500/10 text-brand-300 border-brand-500/25 hover:bg-brand-500/20 hover:shadow-glow-sm'}`}>
+                        {justDone ? <><CheckCircle2 size={13} /> Berhasil</>
+                          : isBusy ? <RefreshCw size={13} className="animate-spin" />
+                          : kind === 'release' ? <><Coins size={13} /> Release coin</>
+                          : <><CheckCircle2 size={13} /> Konfirmasi bayar</>}
+                      </button>
+                    </div>
+                  );
+                })()}
                 {order.unreadCount > 0 && (
                   <button onClick={() => setOpenChatOrder(order.advOrderNo)}
-                    className="mx-3.5 mb-2.5 flex items-center gap-1.5 text-xs text-sell hover:bg-sell/10 bg-sell/5 border border-sell/20 px-2 py-1 rounded-md transition-colors">
-                    <MessageSquare size={11} /> {order.unreadCount} unread — open chat
+                    className="mx-3 sm:mx-3.5 mb-2.5 flex items-center gap-1.5 text-xs text-sell hover:bg-sell/10 bg-sell/5 border border-sell/20 px-2.5 py-1.5 rounded-lg transition-colors">
+                    <MessageSquare size={12} /> {order.unreadCount} pesan belum dibaca — buka chat
                   </button>
                 )}
               </div>
@@ -596,14 +686,17 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           })
         ) : (
           filteredAds.length === 0 ? (
-            <div className="text-center py-12 text-sm text-surface-300">No ads.</div>
+            <div className="text-center py-12 px-6">
+              <p className="text-sm text-surface-200">Belum ada iklan.</p>
+              <p className="text-xs text-surface-300 mt-1">Buat iklan lewat aplikasi MEXC, lalu refresh panel ini.</p>
+            </div>
           ) : (
-            <div className="p-2.5 space-y-2.5">
+            <div className="p-2.5 sm:p-3 space-y-2.5">
               {filteredAds.map(ad => {
                 const adNo = ad.advNo || ad.davNo;
                 const isOpen = ad.advStatus === 'OPEN' || ad.advStatus === 1;
                 return (
-                  <div key={adNo} className={`bg-surface-900 border rounded-lg p-3 transition-colors ${isOpen ? 'border-surface-700' : 'border-surface-700/50 opacity-60'}`}>
+                  <div key={adNo} className={`bg-surface-900 border rounded-xl p-3 transition-all card-hover ${isOpen ? 'border-surface-700' : 'border-surface-700/50 opacity-60'}`}>
                     <div className="flex items-center justify-between mb-2.5">
                       <div className="flex items-center gap-1.5"><SideBadge side={ad.side} /><AdStatusBadge status={ad.advStatus} /></div>
                       <button onClick={e => toggleAdStatus(ad, e)} disabled={togglingAd === adNo} title={isOpen ? 'Pause ad' : 'Activate ad'}
@@ -627,7 +720,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                     </div>
                     <button onClick={() => { setEditAd(ad); setShowAdModal(true); }}
                       className="w-full flex items-center justify-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 bg-surface-800 hover:bg-surface-700 border border-surface-700 rounded-md py-1.5 transition-colors">
-                      <Pencil size={12} /> Edit ad
+                      <Pencil size={12} /> Ubah iklan
                     </button>
                   </div>
                 );

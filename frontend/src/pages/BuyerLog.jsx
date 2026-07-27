@@ -62,7 +62,7 @@ export default function BuyerLog() {
 
   return (
     <Layout>
-      <div className="h-screen flex flex-col bg-surface-950 overflow-hidden">
+      <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
         <header className="flex items-center gap-3 px-4 h-14 border-b border-surface-700 flex-shrink-0">
           <BookUser size={18} className="text-brand-400" />
           <h1 className="font-semibold text-surface-50 text-[15px]">Catatan Buyer</h1>
@@ -71,7 +71,7 @@ export default function BuyerLog() {
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className={card + ' p-4'}>
-            <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3">
               <div>
                 <label className="text-xs text-surface-300 uppercase tracking-wide block mb-1.5">Merchant</label>
                 <select value={merchantSel} onChange={e => setMerchantSel(e.target.value)} className={inp + ' min-w-[180px]'}>
@@ -98,14 +98,15 @@ export default function BuyerLog() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Total catatan</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{records.length}</p></div>
             <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Nama unik</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{uniqueNames}</p></div>
             <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Nama duplikat</p><p className={`text-2xl font-mono font-semibold mt-1 ${dupNames ? 'text-sell' : 'text-surface-50'}`}>{dupNames}</p></div>
           </div>
 
           <div className={card + ' overflow-hidden'}>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[620px]">
               <thead>
                 <tr className="border-b border-surface-700 text-left text-xs text-surface-300 uppercase tracking-wide">
                   <th className="px-4 py-2.5 font-medium">Nama KYC</th>
@@ -142,6 +143,7 @@ export default function BuyerLog() {
                 ))}
               </tbody>
             </table>
+            </div>
             {rows.length === 0 && (
               <p className="text-center py-12 text-surface-300 text-sm">
                 {records.length === 0

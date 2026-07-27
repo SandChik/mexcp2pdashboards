@@ -11,6 +11,7 @@ const ordersRoutes = require('./routes/orders');
 const chatRoutes = require('./routes/chat');
 const auditRoutes = require('./routes/audit');
 const registryRoutes = require('./routes/registry');
+const autoreplyRoutes = require('./routes/autoreply');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -38,6 +39,7 @@ app.use('/api/orders', ordersRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/registry', registryRoutes);
+app.use('/api/autoreply', autoreplyRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
 

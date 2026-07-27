@@ -5,34 +5,37 @@
 @layer base {
   * { box-sizing: border-box; }
 
+  html { -webkit-text-size-adjust: 100%; }
+
   body {
-    /* Pure black with a faint cold-blue aurora at the top — futuristic but quiet */
     background:
-      radial-gradient(1100px 480px at 50% -10%, rgba(32, 80, 255, 0.10), transparent 62%),
-      radial-gradient(700px 380px at 92% 108%, rgba(32, 80, 255, 0.05), transparent 60%),
+      radial-gradient(1100px 480px at 50% -10%, rgba(32, 80, 255, 0.11), transparent 62%),
+      radial-gradient(700px 380px at 92% 108%, rgba(139, 92, 246, 0.06), transparent 60%),
       #000000;
     background-attachment: fixed;
     color: #f2f5ff;
     font-family: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    /* Prevent iOS rubber-band on the app shell */
+    overscroll-behavior-y: none;
   }
 
-  /* Tactile, uniform micro-interactions everywhere without touching components */
-  button {
-    transition: color .15s ease, background-color .15s ease, border-color .15s ease,
-                box-shadow .2s ease, transform .1s ease, opacity .15s ease;
-  }
+  button { transition: color .15s ease, background-color .15s ease, border-color .15s ease,
+                       box-shadow .2s ease, transform .1s ease, opacity .15s ease; }
   button:active:not(:disabled) { transform: scale(0.97); }
 
-  /* Thin scrollbar, blue on hover */
+  /* Touch targets: heuristic #7 / mobile ergonomics — nothing tappable under 40px on touch devices */
+  @media (pointer: coarse) {
+    button, a[role="button"], select { min-height: 40px; }
+    .tap-sm { min-height: 32px; }
+  }
+
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #151d33; border-radius: 9999px; }
   ::-webkit-scrollbar-thumb:hover { background: #2050ff88; }
-
   ::selection { background: #2050ff55; }
 
-  /* Keyboard focus = neon ring */
   :focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px rgba(32, 80, 255, 0.65), 0 0 14px rgba(32, 80, 255, 0.35);
@@ -40,18 +43,56 @@
   }
 
   input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
-  input[type="date"] { color-scheme: dark; }
+  input[type="date"], input[type="number"], select, textarea { color-scheme: dark; }
+  /* iOS zooms the page when an input under 16px gets focus */
+  @media (pointer: coarse) { input, select, textarea { font-size: 16px !important; } }
 }
 
 @layer components {
-  .seg { @apply flex items-center gap-0.5 bg-surface-900 border border-surface-700 rounded-md p-0.5; }
-  .seg-btn { @apply px-2.5 py-1 rounded text-xs font-medium text-surface-200 hover:text-surface-50 transition-colors; }
+  .seg { @apply flex items-center gap-0.5 bg-surface-900 border border-surface-700 rounded-lg p-0.5; }
+  .seg-btn { @apply px-2.5 py-1 rounded-md text-xs font-medium text-surface-200 hover:text-surface-50 transition-colors whitespace-nowrap tap-sm; }
   .seg-btn-active { @apply bg-brand-500/15 text-brand-300 shadow-glow-sm; }
+
+  /* Panel: subtle top-left blue wash instead of a flat slab */
+  .card {
+    @apply bg-surface-800 border border-surface-700 rounded-xl;
+    background-image: linear-gradient(160deg, rgba(32,80,255,0.055) 0%, rgba(0,0,0,0) 44%);
+  }
+  .card-hover { @apply transition-all duration-200 hover:border-surface-600 hover:shadow-lift; }
+
+  /* Frosted sticky headers */
+  .glass { @apply bg-black/60 backdrop-blur-xl border-surface-700; }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 text-white text-sm font-medium rounded-lg px-3.5 h-9
+           transition-all disabled:opacity-40 disabled:cursor-not-allowed;
+    background-image: linear-gradient(135deg, #4d74ff 0%, #2050ff 55%, #1432ab 100%);
+  }
+  .btn-primary:hover:not(:disabled) { box-shadow: 0 0 18px rgba(32,80,255,.45); filter: brightness(1.08); }
+
+  .btn-ghost { @apply inline-flex items-center justify-center gap-1.5 text-sm text-surface-200 hover:text-surface-50
+                      border border-surface-700 hover:border-surface-600 hover:bg-surface-800 rounded-lg px-3 h-9 transition-all; }
+
+  /* Loading placeholder — visible system status instead of a blank area */
+  .skeleton {
+    @apply rounded-md bg-surface-800;
+    background-image: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(77,116,255,0.10) 50%, rgba(255,255,255,0) 100%);
+    background-size: 500px 100%;
+    @apply animate-shimmer;
+  }
+
+  /* Left accent bar that colours a row by its state */
+  .row-accent { @apply border-l-2; }
 }
 
 @layer utilities {
-  /* Primary CTAs (bg-brand-500) glow on hover — one rule covers the whole app */
-  .bg-brand-500:hover { box-shadow: 0 0 16px rgba(32, 80, 255, 0.45); }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* Safe areas for iPhone home indicator / notch */
+  .pb-safe { padding-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
 
   @keyframes pulse-glow {
     0%, 100% { box-shadow: 0 0 6px rgba(32, 80, 255, 0.30); }

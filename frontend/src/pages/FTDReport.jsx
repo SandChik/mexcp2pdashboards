@@ -21,6 +21,7 @@ export default function FTDReport() {
   const [merchantSel, setMerchantSel] = useState('all');
   const [rangeKind, setRangeKind] = useState('event');
   const [custom, setCustom] = useState({ from: toDateStr(startOfDay()), to: toDateStr(Date.now()) });
+  const [minBuy, setMinBuy] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [result, setResult] = useState(null);
@@ -95,23 +96,28 @@ export default function FTDReport() {
       b.isFtd = b.captured && b.priorP2P === 0;
     });
     rows.sort((a, b) => (b.isFtd - a.isFtd) || ((a.priorP2P ?? 1e9) - (b.priorP2P ?? 1e9)) || b.usdt - a.usdt);
-    const ftd = rows.filter(b => b.isFtd);
-    setResult({
-      totalOrders, capturedOrders,
-      uniqueBuyers: rows.length,
-      ftdCount: ftd.length,
-      ftdUsdt: ftd.reduce((s, b) => s + b.usdt, 0),
-      notCaptured: rows.filter(b => !b.captured).length,
-      rows,
-    });
+    setResult({ totalOrders, capturedOrders, rows });
     setLoading(false); setStatus('');
   }
+
+  const min = parseFloat(minBuy) || 0;
+  const rows = result ? result.rows.filter(b => b.usdt >= min) : [];
+  const ftd = rows.filter(b => b.isFtd);
+  const view = result && {
+    totalOrders: result.totalOrders,
+    capturedOrders: result.capturedOrders,
+    uniqueBuyers: rows.length,
+    ftdCount: ftd.length,
+    ftdUsdt: ftd.reduce((s, b) => s + b.usdt, 0),
+    notCaptured: rows.filter(b => !b.captured).length,
+    rows,
+  };
 
   const card = 'bg-surface-800 border border-surface-700 rounded-lg p-4';
 
   return (
     <Layout>
-      <div className="h-screen flex flex-col bg-surface-950 overflow-hidden">
+      <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
         <header className="flex items-center gap-3 px-4 h-14 border-b border-surface-700 flex-shrink-0">
           <UserPlus size={18} className="text-brand-400" />
           <h1 className="font-semibold text-surface-50 text-[15px]">FTD</h1>
@@ -119,7 +125,7 @@ export default function FTDReport() {
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className={card}>
-            <div className="flex flex-wrap items-end gap-4">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 sm:gap-4">
               <div>
                 <label className="text-xs text-surface-300 uppercase tracking-wide block mb-1.5">Merchant</label>
                 <select value={merchantSel} onChange={e => setMerchantSel(e.target.value)}
@@ -150,6 +156,11 @@ export default function FTDReport() {
                   ))}
                 </div>
               )}
+              <div>
+                <label className="text-xs text-surface-300 uppercase tracking-wide block mb-1.5">Min purchase (USDT)</label>
+                <input type="number" min="0" step="any" value={minBuy} onChange={e => setMinBuy(e.target.value)} placeholder="0"
+                  className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-sm text-surface-50 font-mono focus:outline-none focus:border-brand-500 w-[130px]" />
+              </div>
               <button onClick={calculate} disabled={loading}
                 className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium rounded-md px-5 py-2 flex items-center gap-2 transition-colors">
                 {loading ? <RefreshCw size={15} className="animate-spin" /> : <UserPlus size={15} />}{loading ? 'Calculating…' : 'Calculate'}
@@ -158,23 +169,25 @@ export default function FTDReport() {
             {loading && status && <p className="text-xs text-brand-400 mt-2 font-mono">{status}</p>}
           </div>
 
-          {result && (
+          {view && (
             <>
-              <div className="grid grid-cols-3 gap-3">
-                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Completed SELL orders</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{result.totalOrders}</p><p className="text-[11px] text-surface-300 mt-0.5">{result.capturedOrders} captured</p></div>
-                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">FTD (0 prior P2P)</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{result.ftdCount}</p></div>
-                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">FTD volume (USDT)</p><p className="text-2xl font-mono font-semibold text-buy mt-1">{formatAmount(result.ftdUsdt, 2)}</p></div>
+              {min > 0 && <p className="text-xs text-surface-300">Counting only buyers with total purchase ≥ <span className="font-mono text-brand-400">{formatAmount(min, 2)}</span> USDT.</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Completed SELL orders</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{view.totalOrders}</p><p className="text-[11px] text-surface-300 mt-0.5">{view.capturedOrders} captured</p></div>
+                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">FTD (0 prior P2P)</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{view.ftdCount}</p></div>
+                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">FTD volume (USDT)</p><p className="text-2xl font-mono font-semibold text-buy mt-1">{formatAmount(view.ftdUsdt, 2)}</p></div>
               </div>
 
-              {result.notCaptured > 0 && (
+              {view.notCaptured > 0 && (
                 <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 flex items-start gap-2 text-xs text-warning">
                   <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-                  <span>{result.notCaptured} buyer(s) had no captured stats — their orders completed while the dashboard wasn't capturing, so MEXC no longer exposes their trade count. Keep the dashboard open during the event so in-progress orders get snapshotted.</span>
+                  <span>{view.notCaptured} buyer(s) had no captured stats — their orders completed while the dashboard wasn't capturing, so MEXC no longer exposes their trade count. Keep the dashboard open during the event so in-progress orders get snapshotted.</span>
                 </div>
               )}
 
               <div className={card + ' !p-0 overflow-hidden'}>
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[620px]">
                   <thead>
                     <tr className="border-b border-surface-700 text-center text-xs text-surface-300 uppercase tracking-wide">
                       <th className="px-4 py-2.5 font-medium">#</th>
@@ -188,7 +201,7 @@ export default function FTDReport() {
                     </tr>
                   </thead>
                   <tbody className="text-center">
-                    {result.rows.map((b, i) => (
+                    {view.rows.map((b, i) => (
                       <tr key={i} className={`border-b border-surface-700/50 hover:bg-surface-900/40 ${b.isFtd ? 'bg-brand-500/5' : ''}`}>
                         <td className="px-4 py-2 text-surface-300 font-mono">{i + 1}</td>
                         <td className="px-4 py-2 text-surface-200 truncate max-w-[180px]">{b.nickName}</td>
@@ -206,7 +219,8 @@ export default function FTDReport() {
                     ))}
                   </tbody>
                 </table>
-                {result.rows.length === 0 && <p className="text-center py-10 text-surface-300 text-sm">No completed SELL orders in this range.</p>}
+            </div>
+                {view.rows.length === 0 && <p className="text-center py-10 text-surface-300 text-sm">{min > 0 ? 'No buyers meet the minimum purchase in this range.' : 'No completed SELL orders in this range.'}</p>}
               </div>
             </>
           )}

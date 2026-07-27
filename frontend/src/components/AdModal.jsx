@@ -112,8 +112,8 @@ export default function AdModal({ merchantId, existingAd, onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-surface-800 border border-surface-700 rounded-lg w-full max-w-lg max-h-[92vh] flex flex-col shadow-2xl shadow-black/50">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4 animate-fade-in">
+      <div className="card !rounded-b-none sm:!rounded-xl w-full max-w-lg max-h-[92dvh] flex flex-col shadow-lift animate-sheet-up sm:animate-slide-up">
 
         <div className="flex items-center justify-between px-5 py-4 border-b border-surface-700">
           <div>

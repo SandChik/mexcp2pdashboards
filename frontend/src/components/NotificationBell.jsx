@@ -4,15 +4,16 @@ import { getNotifs, subscribe, markAllRead, clearNotifs, unreadCount } from '../
 
 function ago(t) {
   const s = Math.floor((Date.now() - t) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 60) return `${s} dtk lalu`;
+  if (s < 3600) return `${Math.floor(s / 60)} mnt lalu`;
+  if (s < 86400) return `${Math.floor(s / 3600)} jam lalu`;
   return new Date(t).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
 }
 
 const TYPE_COLOR = {
-  'New order': 'text-buy', 'Order': 'text-brand-400', 'Message': 'text-brand-400',
+  'New order': 'text-buy', 'Order': 'text-brand-300', 'Message': 'text-cyan-400',
   'Released': 'text-buy', 'Paused': 'text-warning', 'Resumed': 'text-buy', 'Error': 'text-sell',
+  'Nama duplikat': 'text-sell',
 };
 
 export default function NotificationBell() {
@@ -26,7 +27,7 @@ export default function NotificationBell() {
   return (
     <div className="relative">
       <button onClick={() => setOpen(o => { const n = !o; if (n) markAllRead(); return n; })}
-        title="Notifications" className="relative flex items-center justify-center w-8 h-8 rounded-md border border-surface-700 text-surface-200 hover:bg-surface-800 transition-colors">
+        title="Notifikasi" className="relative flex items-center justify-center w-8 h-8 rounded-lg border border-surface-700 text-surface-200 hover:bg-surface-800 transition-colors">
         <Bell size={15} />
         {unread > 0 && (
           <span className="absolute -top-1.5 -right-1.5 bg-sell text-white text-[9px] font-semibold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center">
@@ -37,7 +38,7 @@ export default function NotificationBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-10 z-20 w-80 max-h-[26rem] overflow-hidden flex flex-col bg-surface-800 border border-surface-700 rounded-lg shadow-xl shadow-black/50">
+          <div className="fixed sm:absolute left-2 right-2 sm:left-auto sm:right-0 top-[3.6rem] sm:top-10 z-20 sm:w-80 max-h-[26rem] overflow-hidden flex flex-col card shadow-lift animate-slide-up">
             <div className="flex items-center justify-between px-3 py-2 border-b border-surface-700 flex-shrink-0">
               <span className="text-sm font-semibold text-surface-50">Notifications</span>
               {notifs.length > 0 && (

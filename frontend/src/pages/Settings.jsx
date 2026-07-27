@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { merchantApi, authApi } from '../api';
 import Layout from '../components/Layout';
 import MessageSettings from '../components/MessageSettings';
+import SoundSettings from '../components/SoundSettings';
 import { Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Key } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { askConfirm } from '../components/confirm';
@@ -191,8 +192,8 @@ export default function Settings() {
 
   return (
     <Layout>
-      <div className="h-screen overflow-y-auto p-6">
-        <div className="max-w-lg mx-auto space-y-6">
+      <div className="h-[100dvh] overflow-y-auto p-3 sm:p-6">
+        <div className="max-w-lg mx-auto space-y-5 sm:space-y-6">
           <div>
             <h1 className="font-display font-semibold text-white text-xl">Settings</h1>
             <p className="text-xs text-surface-200/40 font-mono mt-1">Manage merchants and app configuration</p>
@@ -280,6 +281,8 @@ export default function Settings() {
 
           {/* Info */}
           <MessageSettings />
+
+          <SoundSettings />
 
           <div className="bg-surface-800/50 border border-surface-200/5 rounded-xl p-4 text-xs text-surface-200/30 font-mono space-y-1">
             <p>• API keys are stored locally on your machine</p>

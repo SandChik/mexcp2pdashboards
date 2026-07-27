@@ -20,6 +20,7 @@ export default function UUReport() {
   const [merchantSel, setMerchantSel] = useState('all');
   const [rangeKind, setRangeKind] = useState('event');
   const [custom, setCustom] = useState({ from: toDateStr(startOfDay()), to: toDateStr(Date.now()) });
+  const [minBuy, setMinBuy] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [result, setResult] = useState(null);
@@ -79,15 +80,26 @@ export default function UUReport() {
     }
 
     const rows = [...users.values()].sort((a, b) => b.usdt - a.usdt);
-    setResult({ totalOrders, uniqueUsers: rows.length, totalUsdt: rows.reduce((s, u) => s + u.usdt, 0), rows, capped, unresolved });
+    setResult({ totalOrders, rows, capped, unresolved });
     setLoading(false); setStatus('');
   }
+
+  const min = parseFloat(minBuy) || 0;
+  const rows = result ? result.rows.filter(u => u.usdt >= min) : [];
+  const view = result && {
+    totalOrders: result.totalOrders,
+    uniqueUsers: rows.length,
+    totalUsdt: rows.reduce((s, u) => s + u.usdt, 0),
+    rows,
+    capped: result.capped,
+    unresolved: result.unresolved,
+  };
 
   const card = 'bg-surface-800 border border-surface-700 rounded-lg p-4';
 
   return (
     <Layout>
-      <div className="h-screen flex flex-col bg-surface-950 overflow-hidden">
+      <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
         <header className="flex items-center gap-3 px-4 h-14 border-b border-surface-700 flex-shrink-0">
           <Users size={18} className="text-brand-400" />
           <h1 className="font-semibold text-surface-50 text-[15px]">Unique Users</h1>
@@ -96,7 +108,7 @@ export default function UUReport() {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Controls */}
           <div className={card}>
-            <div className="flex flex-wrap items-end gap-4">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 sm:gap-4">
               <div>
                 <label className="text-xs text-surface-300 uppercase tracking-wide block mb-1.5">Merchant</label>
                 <select value={merchantSel} onChange={e => setMerchantSel(e.target.value)}
@@ -127,6 +139,11 @@ export default function UUReport() {
                   ))}
                 </div>
               )}
+              <div>
+                <label className="text-xs text-surface-300 uppercase tracking-wide block mb-1.5">Min purchase (USDT)</label>
+                <input type="number" min="0" step="any" value={minBuy} onChange={e => setMinBuy(e.target.value)} placeholder="0"
+                  className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-sm text-surface-50 font-mono focus:outline-none focus:border-brand-500 w-[130px]" />
+              </div>
               <button onClick={calculate} disabled={loading}
                 className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium rounded-md px-5 py-2 flex items-center gap-2 transition-colors">
                 {loading ? <RefreshCw size={15} className="animate-spin" /> : <Users size={15} />}{loading ? 'Calculating…' : 'Calculate UU'}
@@ -135,26 +152,28 @@ export default function UUReport() {
             {loading && status && <p className="text-xs text-brand-400 mt-2 font-mono">{status}</p>}
           </div>
 
-          {result && (
+          {view && (
             <>
-              <div className="grid grid-cols-3 gap-3">
-                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Completed SELL orders</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{result.totalOrders}</p></div>
-                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Unique users (UU)</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{result.uniqueUsers}</p></div>
-                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Total USDT sold</p><p className="text-2xl font-mono font-semibold text-sell mt-1">{formatAmount(result.totalUsdt, 2)}</p></div>
+              {min > 0 && <p className="text-xs text-surface-300">Counting only users with total purchase ≥ <span className="font-mono text-brand-400">{formatAmount(min, 2)}</span> USDT.</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Completed SELL orders</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{view.totalOrders}</p></div>
+                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Unique users (UU)</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{view.uniqueUsers}</p></div>
+                <div className={card}><p className="text-xs text-surface-300 uppercase tracking-wide">Total USDT sold</p><p className="text-2xl font-mono font-semibold text-sell mt-1">{formatAmount(view.totalUsdt, 2)}</p></div>
               </div>
 
-              {(result.capped || result.unresolved > 0) && (
+              {(view.capped || view.unresolved > 0) && (
                 <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 flex items-start gap-2 text-xs text-warning">
                   <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
                   <span>
-                    {result.capped && 'Some orders exceeded the per-run lookup cap (600) — run again to resolve the rest (cached results make it fast). '}
-                    {result.unresolved > 0 && `${result.unresolved} order(s) had no member ID and were counted by nickname (approximate).`}
+                    {view.capped && 'Some orders exceeded the per-run lookup cap (600) — run again to resolve the rest (cached results make it fast). '}
+                    {view.unresolved > 0 && `${view.unresolved} order(s) had no member ID and were counted by nickname (approximate).`}
                   </span>
                 </div>
               )}
 
               <div className={card + ' !p-0 overflow-hidden'}>
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[620px]">
                   <thead>
                     <tr className="border-b border-surface-700 text-center text-xs text-surface-300 uppercase tracking-wide">
                       <th className="px-4 py-2.5 font-medium">#</th>
@@ -165,7 +184,7 @@ export default function UUReport() {
                     </tr>
                   </thead>
                   <tbody className="text-center">
-                    {result.rows.map((u, i) => (
+                    {view.rows.map((u, i) => (
                       <tr key={i} className="border-b border-surface-700/50 hover:bg-surface-900/40">
                         <td className="px-4 py-2 text-surface-300 font-mono">{i + 1}</td>
                         <td className="px-4 py-2 font-mono text-surface-50 text-xs">{u.memberId || <span className="text-warning">{u.nickName} (no UID)</span>}</td>
@@ -176,7 +195,8 @@ export default function UUReport() {
                     ))}
                   </tbody>
                 </table>
-                {result.rows.length === 0 && <p className="text-center py-10 text-surface-300 text-sm">No completed SELL orders in this range.</p>}
+            </div>
+                {view.rows.length === 0 && <p className="text-center py-10 text-surface-300 text-sm">{min > 0 ? 'No users meet the minimum purchase in this range.' : 'No completed SELL orders in this range.'}</p>}
               </div>
             </>
           )}

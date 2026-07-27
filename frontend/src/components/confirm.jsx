@@ -11,7 +11,7 @@ export function askConfirm({ title, message, confirmText = 'Confirm', cancelText
     root.render(
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         onClick={() => close(false)}>
-        <div className={`w-full max-w-md bg-surface-800 border ${danger ? 'border-sell/40' : 'border-surface-700'} rounded-2xl shadow-2xl shadow-black/70 p-6`}
+        <div className={`w-full max-w-md card border ${danger ? '!border-sell/40' : ''} !rounded-2xl shadow-lift p-5 sm:p-6 animate-slide-up`}
           onClick={(e) => e.stopPropagation()}>
           {title && <h3 className={`text-lg font-semibold ${danger ? 'text-sell' : 'text-surface-50'}`}>{title}</h3>}
           <p className="text-sm text-surface-200 mt-2 whitespace-pre-line leading-relaxed">{message}</p>

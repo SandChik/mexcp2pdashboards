@@ -7,6 +7,7 @@ import Settings from './pages/Settings';
 import UUReport from './pages/UUReport';
 import FTDReport from './pages/FTDReport';
 import BuyerLog from './pages/BuyerLog';
+import ActionQueue from './pages/ActionQueue';
 
 function ProtectedRoute({ children }) {
   const { isAuth } = useAuth();
@@ -23,6 +24,7 @@ function AppRoutes() {
       <Route path="/uu" element={<ProtectedRoute><UUReport /></ProtectedRoute>} />
       <Route path="/ftd" element={<ProtectedRoute><FTDReport /></ProtectedRoute>} />
       <Route path="/buyers" element={<ProtectedRoute><BuyerLog /></ProtectedRoute>} />
+      <Route path="/queue" element={<ProtectedRoute><ActionQueue /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

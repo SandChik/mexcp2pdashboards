@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { merchantApi } from '../api';
 import MerchantPanel from '../components/MerchantPanel';
 import Layout from '../components/Layout';
-import { Plus, RefreshCw, Calendar, Radio, CalendarRange } from 'lucide-react';
+import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X } from 'lucide-react';
 import NotificationBell from '../components/NotificationBell';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,7 +15,7 @@ const toDateStr = (ts) => new Date(ts).toISOString().slice(0, 10);
 // Most recent Friday 00:00 that is <= now (today if today is Friday).
 function lastFridayStart() {
   const d = new Date(); d.setHours(0, 0, 0, 0);
-  const diff = (d.getDay() - 5 + 7) % 7; // 0=Sun..6=Sat, Friday=5
+  const diff = (d.getDay() - 5 + 7) % 7;
   d.setDate(d.getDate() - diff);
   return d.getTime();
 }
@@ -28,6 +28,7 @@ export default function Dashboard() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showDate, setShowDate] = useState(false);
   const [dateInput, setDateInput] = useState(() => ({ from: toDateStr(todayStart()), to: toDateStr(Date.now()) }));
+  const [activeMerchant, setActiveMerchant] = useState(0); // mobile: which panel is shown
   const navigate = useNavigate();
   const dateRef = useRef(null);
 
@@ -40,8 +41,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     const h = (e) => { if (dateRef.current && !dateRef.current.contains(e.target)) setShowDate(false); };
+    const esc = (e) => { if (e.key === 'Escape') setShowDate(false); }; // heuristic #3: always an exit
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', esc); };
   }, []);
 
   function setPreset(kind) {
@@ -56,7 +59,7 @@ export default function Dashboard() {
     const to = new Date(dateInput.to + 'T23:59:59').getTime();
     if (isNaN(from) || isNaN(to)) return;
     if (to <= from) return;
-    if (to - from > MAX_DAYS * DAY) return; // backend window cap
+    if (to - from > MAX_DAYS * DAY) return;
     setDateRange({ startTime: from, endTime: to, kind: 'custom' });
     setShowDate(false);
   }
@@ -64,100 +67,165 @@ export default function Dashboard() {
     const from = new Date(dateInput.from + 'T00:00:00').getTime();
     const to = new Date(dateInput.to + 'T23:59:59').getTime();
     if (isNaN(from) || isNaN(to)) return null;
-    if (to <= from) return 'End must be after start';
-    if (to - from > MAX_DAYS * DAY) return `Range can't exceed ${MAX_DAYS} days`;
+    if (to <= from) return 'Tanggal akhir harus setelah tanggal mulai';
+    if (to - from > MAX_DAYS * DAY) return `Rentang maksimal ${MAX_DAYS} hari`;
     return null;
   })();
 
   const rangeLabel = (() => {
-    if (dateRange.kind === 'today') return 'Today';
-    if (dateRange.kind === 'event') return 'Event week (Fri→now)';
-    if (dateRange.kind === '3d') return 'Last 3 days';
-    if (dateRange.kind === '7d') return 'Last 7 days';
+    if (dateRange.kind === 'today') return 'Hari ini';
+    if (dateRange.kind === 'event') return 'Event (Jum→now)';
+    if (dateRange.kind === '3d') return '3 hari';
+    if (dateRange.kind === '7d') return '7 hari';
     const f = new Date(dateRange.startTime), t = new Date(dateRange.endTime);
     return `${f.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })} – ${t.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })}`;
   })();
 
+  // Loading: skeletons rather than a lone spinner, so the shape of what's
+  // coming is visible immediately (heuristic #1).
   if (loading) return (
-    <div className="flex items-center justify-center h-screen bg-surface-950">
-      <RefreshCw size={20} className="text-brand-500 animate-spin" />
+    <Layout>
+      <div className="h-[100dvh] flex flex-col bg-surface-950 p-3 gap-3">
+        <div className="skeleton h-12 w-full" />
+        <div className="grid gap-3 flex-1 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
+          {[0, 1, 2].map(i => <div key={i} className="skeleton h-full min-h-[200px]" />)}
+        </div>
+      </div>
+    </Layout>
+  );
+
+  const datePanel = (
+    <div className="w-full sm:w-64 bg-surface-800 border border-surface-700 rounded-xl p-3 shadow-lift">
+      <button onClick={() => setPreset('event')}
+        className="w-full flex items-center gap-2 text-xs text-brand-300 hover:bg-brand-500/10 border border-brand-500/30 rounded-lg px-2.5 py-2.5 mb-2 transition-colors">
+        <CalendarRange size={14} /> Event week — Jumat → sekarang
+      </button>
+      <div className="grid grid-cols-3 gap-1.5 mb-3">
+        {[['Hari ini', 'today'], ['3 hari', 3], ['7 hari', 7]].map(([l, k]) => (
+          <button key={l} onClick={() => setPreset(k)}
+            className="text-xs text-surface-200 hover:text-surface-50 bg-surface-900 hover:bg-surface-700 border border-surface-700 rounded-lg px-2 py-2 transition-colors">{l}</button>
+        ))}
+      </div>
+      <p className="text-xs text-surface-300 mb-2">Rentang khusus (maks {MAX_DAYS} hari)</p>
+      <div className="grid grid-cols-2 gap-2">
+        {[['Dari', 'from'], ['Sampai', 'to']].map(([lbl, k]) => (
+          <div key={k}>
+            <label className="text-[11px] text-surface-300 block mb-1">{lbl}</label>
+            <input type="date" value={dateInput[k]} onChange={e => setDateInput(p => ({ ...p, [k]: e.target.value }))}
+              className="w-full bg-surface-900 border border-surface-700 rounded-lg px-2 py-1.5 text-xs text-surface-50 font-mono focus:outline-none focus:border-brand-500" />
+          </div>
+        ))}
+      </div>
+      {customInvalid && <p className="text-xs text-sell mt-2">{customInvalid}</p>}
+      <button onClick={applyCustom} disabled={!!customInvalid}
+        className="btn-primary w-full mt-3 !h-9 !text-xs">Terapkan rentang</button>
     </div>
   );
 
   return (
     <Layout>
-      <div className="h-screen flex flex-col bg-surface-950">
+      <div className="h-[100dvh] flex flex-col bg-surface-950">
 
-        {/* Top bar */}
-        <header className="flex items-center justify-between px-4 h-14 border-b border-surface-700 flex-shrink-0">
-          <div className="flex items-baseline gap-3">
-            <h1 className="font-semibold text-surface-50 text-[15px] tracking-tight">P2P Dashboard</h1>
-            <span className="text-xs text-surface-300">{merchants.length} {merchants.length === 1 ? 'merchant' : 'merchants'}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative" ref={dateRef}>
-              <button onClick={() => setShowDate(s => !s)}
-                className="flex items-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-md px-2.5 h-8 transition-colors">
-                <Calendar size={13} /> {rangeLabel}
-              </button>
-              {showDate && (
-                <div className="absolute right-0 top-10 z-30 w-60 bg-surface-800 border border-surface-700 rounded-lg p-3 shadow-xl shadow-black/40">
-                  <button onClick={() => setPreset('event')}
-                    className="w-full flex items-center gap-2 text-xs text-brand-400 hover:bg-brand-500/10 border border-brand-500/30 rounded-md px-2.5 py-2 mb-2 transition-colors">
-                    <CalendarRange size={14} /> Event week — Friday → now
-                  </button>
-                  <div className="grid grid-cols-3 gap-1 mb-3">
-                    {[['Today', 'today'], ['3 days', 3], ['7 days', 7]].map(([l, k]) => (
-                      <button key={l} onClick={() => setPreset(k)}
-                        className="text-xs text-surface-200 hover:text-surface-50 bg-surface-900 hover:bg-surface-700 border border-surface-700 rounded px-2 py-1.5 transition-colors">{l}</button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-surface-300 mb-2">Custom range (max {MAX_DAYS} days)</p>
-                  {[['From', 'from'], ['To', 'to']].map(([lbl, k]) => (
-                    <div key={k} className="mb-2">
-                      <label className="text-xs text-surface-300 block mb-1">{lbl}</label>
-                      <input type="date" value={dateInput[k]} onChange={e => setDateInput(p => ({ ...p, [k]: e.target.value }))}
-                        className="w-full bg-surface-900 border border-surface-700 rounded px-2 py-1 text-xs text-surface-50 font-mono focus:outline-none focus:border-brand-500" />
-                    </div>
-                  ))}
-                  {customInvalid && <p className="text-xs text-sell mb-2">{customInvalid}</p>}
-                  <button onClick={applyCustom} disabled={!!customInvalid}
-                    className="w-full bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-xs rounded py-1.5 transition-colors">Apply range</button>
-                </div>
-              )}
+        {/* ── Top bar ─────────────────────────────────────────────────── */}
+        <header className="glass border-b flex-shrink-0 z-30">
+          <div className="flex items-center justify-between gap-2 px-3 sm:px-4 h-14">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">P2P Dashboard</h1>
+              <span className="hidden xs:inline text-xs text-surface-300 flex-shrink-0">{merchants.length} merchant</span>
             </div>
-            <NotificationBell />
-            <button onClick={() => setAutoRefresh(a => !a)} title="Auto-refresh data every 5s (this does NOT pause trading)"
-              className={`flex items-center gap-1.5 text-xs rounded-md px-2.5 h-8 border transition-colors ${
-                autoRefresh ? 'text-buy border-buy/30 bg-buy/10' : 'text-surface-300 border-surface-700 hover:bg-surface-800'}`}>
-              <Radio size={13} className={autoRefresh ? 'animate-pulse' : ''} />{autoRefresh ? 'Auto' : 'Manual'}
-            </button>
-            <button onClick={() => setRefreshKey(k => k + 1)} title="Refresh all"
-              className="w-8 h-8 flex items-center justify-center text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-md transition-colors">
-              <RefreshCw size={14} />
-            </button>
-            <button onClick={() => navigate('/settings')}
-              className="flex items-center gap-1.5 text-xs font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-md px-3 h-8 transition-colors">
-              <Plus size={14} /> Add merchant
-            </button>
+
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              {/* Date — desktop popover, mobile bottom sheet */}
+              <div className="relative" ref={dateRef}>
+                <button onClick={() => setShowDate(s => !s)} aria-expanded={showDate}
+                  className="btn-ghost !px-2.5 !h-8 !text-xs max-w-[140px]">
+                  <Calendar size={13} className="flex-shrink-0" />
+                  <span className="truncate">{rangeLabel}</span>
+                </button>
+                {showDate && <div className="hidden sm:block absolute right-0 top-10 z-40">{datePanel}</div>}
+              </div>
+
+              <NotificationBell />
+
+              <button onClick={() => setAutoRefresh(a => !a)}
+                title="Auto-refresh data tiap 5 detik (ini TIDAK menghentikan trading)"
+                className={`flex items-center gap-1.5 text-xs rounded-lg px-2 sm:px-2.5 h-8 border transition-all ${
+                  autoRefresh ? 'text-buy border-buy/30 bg-buy/10 shadow-glow-buy' : 'text-surface-300 border-surface-700 hover:bg-surface-800'}`}>
+                <Radio size={13} className={autoRefresh ? 'animate-pulse' : ''} />
+                <span className="hidden sm:inline">{autoRefresh ? 'Auto' : 'Manual'}</span>
+              </button>
+
+              <button onClick={() => setRefreshKey(k => k + 1)} title="Refresh semua panel"
+                className="w-8 h-8 flex items-center justify-center text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg transition-colors">
+                <RefreshCw size={14} />
+              </button>
+
+              <button onClick={() => navigate('/settings')} title="Tambah merchant"
+                className="btn-primary !h-8 !px-2.5 sm:!px-3 !text-xs">
+                <Plus size={14} /><span className="hidden sm:inline">Merchant</span>
+              </button>
+            </div>
           </div>
+
+          {/* Mobile: merchant switcher — one panel at a time beats a squashed grid */}
+          {merchants.length > 1 && (
+            <div className="lg:hidden flex gap-1.5 px-3 pb-2 overflow-x-auto no-scrollbar">
+              {merchants.slice(0, 3).map((m, i) => (
+                <button key={m.id} onClick={() => setActiveMerchant(i)}
+                  className={`flex-shrink-0 text-xs font-medium rounded-lg px-3 py-1.5 border transition-all ${
+                    activeMerchant === i
+                      ? 'bg-brand-500/15 text-brand-300 border-brand-500/40 shadow-glow-sm'
+                      : 'text-surface-300 border-surface-700 hover:text-surface-50'}`}>
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          )}
         </header>
 
+        {/* Mobile bottom sheet for date */}
+        {showDate && (
+          <div className="sm:hidden fixed inset-0 z-50 flex items-end animate-fade-in" onClick={() => setShowDate(false)}>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <div className="relative w-full p-3 pb-safe animate-sheet-up" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-sm font-medium text-surface-50">Pilih rentang</span>
+                <button onClick={() => setShowDate(false)} className="text-surface-300 hover:text-surface-50 p-1"><X size={18} /></button>
+              </div>
+              {datePanel}
+            </div>
+          </div>
+        )}
+
+        {/* ── Panels ──────────────────────────────────────────────────── */}
         {merchants.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3">
-            <p className="text-surface-50 font-medium">No merchants yet</p>
-            <p className="text-sm text-surface-300">Add a MEXC merchant account to start.</p>
-            <button onClick={() => navigate('/settings')}
-              className="mt-1 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors">Go to settings</button>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-grad-brand/20 border border-brand-500/30 flex items-center justify-center mb-1">
+              <Plus size={22} className="text-brand-300" />
+            </div>
+            <p className="text-surface-50 font-medium">Belum ada merchant</p>
+            <p className="text-sm text-surface-300 max-w-xs">Tambahkan akun merchant MEXC (API key & secret) untuk mulai memantau order.</p>
+            <button onClick={() => navigate('/settings')} className="btn-primary mt-1">Buka Settings</button>
           </div>
         ) : (
-          <div className="flex-1 grid gap-3 p-3 overflow-hidden min-h-0"
-            style={{ gridTemplateColumns: `repeat(${Math.min(merchants.length, 3)}, minmax(0, 1fr))` }}>
-            {merchants.slice(0, 3).map(m => (
-              <MerchantPanel key={m.id} merchant={m} dateRange={dateRange}
-                refreshKey={refreshKey} autoRefresh={autoRefresh} />
-            ))}
-          </div>
+          <>
+            {/* Mobile: single panel */}
+            <div className="lg:hidden flex-1 min-h-0 p-2.5">
+              {merchants.slice(0, 3).map((m, i) => (
+                <div key={m.id} className={i === activeMerchant ? 'h-full' : 'hidden'}>
+                  <MerchantPanel merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
+                </div>
+              ))}
+            </div>
+            {/* Desktop: side-by-side grid */}
+            <div className="hidden lg:grid flex-1 gap-3 p-3 overflow-hidden min-h-0"
+              style={{ gridTemplateColumns: `repeat(${Math.min(merchants.length, 3)}, minmax(0, 1fr))` }}>
+              {merchants.slice(0, 3).map(m => (
+                <MerchantPanel key={m.id} merchant={m} dateRange={dateRange}
+                  refreshKey={refreshKey} autoRefresh={autoRefresh} />
+              ))}
+            </div>
+          </>
         )}
       </div>
     </Layout>

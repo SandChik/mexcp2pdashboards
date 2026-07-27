@@ -58,6 +58,11 @@ export const registryApi = {
   remove: (mid, advOrderNo) => api.delete(`/registry/${mid}/${advOrderNo}`)
 };
 
+export const autoReplyApi = {
+  claim:   (mid, advOrderNo, ruleIds) => api.post(`/autoreply/${mid}/claim`,   { advOrderNo, ruleIds }),
+  release: (mid, advOrderNo, ruleIds) => api.post(`/autoreply/${mid}/release`, { advOrderNo, ruleIds })
+};
+
 export const chatApi = {
   getConversation: (mid, orderNo) => api.get(`/chat/${mid}/conversation/${orderNo}`),
   getMessages: (mid, cid, params) => api.get(`/chat/${mid}/messages/${cid}`, { params }),

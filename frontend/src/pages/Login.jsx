@@ -29,24 +29,24 @@ export default function Login() {
   };
 
   if (isSetup === null) return (
-    <div className="min-h-screen bg-black flex items-center justify-center">
+    <div className="min-h-[100dvh] bg-surface-950 flex items-center justify-center">
       <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"/>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-surface-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* MEXC Logo style */}
-        <div className="text-center mb-10">
+        <div className="text-center mb-8 sm:mb-10">
           <div className="inline-flex items-center gap-2.5 mb-6">
-            <div className="w-10 h-10 rounded-lg bg-brand-500 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-xl bg-grad-brand shadow-glow flex items-center justify-center">
               <span className="text-white font-bold font-mono text-lg">M</span>
             </div>
             <span className="text-white font-display font-bold text-2xl tracking-tight">P2P Dashboard</span>
           </div>
           <p className="text-white/50 text-sm font-mono">
-            {isSetup ? 'Enter your password' : 'Set up your dashboard password'}
+            {isSetup ? 'Masukkan password dashboard' : 'Buat password untuk dashboard ini'}
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">

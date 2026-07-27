@@ -7,6 +7,13 @@ import { askConfirm } from './confirm';
 import { addNotif } from '../notifications';
 
 export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 'detail', onClose, onActionDone }) {
+  // Escape always exits the modal (heuristic #3: user control & freedom)
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
   const [order, setOrder] = useState(null);
   const [quickReplies, setQuickReplies] = useState([]); // per-merchant, from backend settings
   useEffect(() => {
@@ -157,7 +164,13 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
     try {
       const r = await ordersApi.releaseCoin(merchantId, advOrderNo);
       if (r.data?.code === 0) addNotif('Released', `Coin released for order ${advOrderNo}`);
-      if (r.data?.code === 0) { toast.success('✅ Coin released!'); loadDetail(); onActionDone?.(); }
+      if (r.data?.code === 0) {
+        toast.success('\u2705 Coin dilepas!');
+        loadDetail(); onActionDone?.();
+        // Auto-close: the action is finished, so drop straight back to the list
+        // instead of making the operator hunt for the X on every order.
+        setTimeout(() => onClose?.(), 900);
+      }
       else toast.error('Gagal: ' + (r.data?.msg || 'Error'));
     } catch (e) { toast.error(e.response?.data?.error || e.message); }
     finally { setActionLoading(''); }
@@ -169,9 +182,10 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
     try {
       const r = await ordersApi.confirmPaid(merchantId, advOrderNo, parseInt(payId));
       if (r.data?.code === 0) {
-        toast.success('✅ Pembayaran dikonfirmasi!');
+        toast.success('\u2705 Pembayaran dikonfirmasi!');
         setShowPayIdInput(false);
         loadDetail(); onActionDone?.();
+        setTimeout(() => onClose?.(), 900);
       } else toast.error('Gagal: ' + (r.data?.msg || 'Error'));
     } catch (e) { toast.error(e.response?.data?.error || e.message); }
     finally { setActionLoading(''); }
@@ -183,24 +197,32 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
   }
 
   if (loading) return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
   const stateNum = order ? normalizeState(order.state) : -1;
-  // order.side = TAKER's perspective:
-  // BUY  → taker is buying FROM merchant  → merchant is SELLER  → merchant releases coin
-  // SELL → taker is selling TO merchant   → merchant is BUYER   → merchant confirms paid
+  // WARNING — the two MEXC endpoints disagree about whose perspective `side`
+  // describes. This modal reads /fiat/order/detail, which reports the
+  // COUNTERPART's side; the order LIST reports OURS. Both are kept straight
+  // here on purpose:
+  //   detail BUY  → they buy from us  → we are SELLER → we release coin
+  //   detail SELL → they sell to us   → we are BUYER  → we confirm paid
   const takerIsBuying  = order?.side === 'BUY';   // merchant sells → release coin
   const takerIsSelling = order?.side === 'SELL';  // merchant buys  → confirm paid
+
+  // Badge shows OUR side, inverted from the detail payload, so the same order
+  // never reads "SELL" in the list and "BUY" here. Display only — never feed
+  // this into the action checks above.
+  const displaySide = order ? (takerIsBuying ? 'SELL' : 'BUY') : null;
   const canRelease      = takerIsBuying  && [1, 2, 3].includes(stateNum);
   const canConfirmPaid  = takerIsSelling && [0, 2, 3].includes(stateNum); // 3=Processing: merchant still needs to confirm payment
   const autoPayId = order?.confirmPaymentInfo?.id || order?.paymentInfo?.[0]?.id || null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-surface-800 border-2 border-surface-700 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4 animate-fade-in">
+      <div className="card !rounded-b-none sm:!rounded-xl w-full max-w-2xl h-[92dvh] sm:h-auto sm:max-h-[90vh] flex flex-col animate-sheet-up sm:animate-slide-up shadow-lift">
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b-2 border-surface-700 bg-surface-900">
@@ -209,7 +231,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
               {advOrderNo}
             </button>
             {order && <OrderStateBadge state={stateNum} />}
-            {order && <SideBadge side={order.side} />}
+            {order && <SideBadge side={displaySide} />}
           </div>
           <button onClick={onClose} className="text-surface-200/40 hover:text-white transition-colors ml-3"><X size={18} /></button>
         </div>

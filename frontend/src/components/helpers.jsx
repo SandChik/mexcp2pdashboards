@@ -31,15 +31,15 @@ export function getAdPaymentLabel(ad) {
 
 // ─── Order States ─────────────────────────────────────────────────────────────
 export const ORDER_STATES = {
-  0: { label: 'Unpaid',     color: 'text-warning bg-warning/10',  group: 'active'    },
-  1: { label: 'Paid',       color: 'text-brand-400 bg-brand-500/10', group: 'active' },
-  2: { label: 'Waiting',    color: 'text-warning bg-warning/10',  group: 'active'    },
-  3: { label: 'Processing', color: 'text-warning bg-warning/10',  group: 'active'    },
-  4: { label: 'Done',       color: 'text-buy bg-buy/10',          group: 'done'      },
-  5: { label: 'Cancelled',  color: 'text-surface-300 bg-surface-800', group: 'cancelled' },
-  6: { label: 'Invalid',    color: 'text-sell bg-sell/10',        group: 'cancelled' },
-  7: { label: 'Refused',    color: 'text-sell bg-sell/10',        group: 'cancelled' },
-  8: { label: 'Timeout',    color: 'text-sell bg-sell/10',        group: 'cancelled' },
+  0: { label: 'Belum bayar', color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
+  1: { label: 'Sudah bayar', color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
+  2: { label: 'Menunggu',    color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
+  3: { label: 'Diproses',    color: 'text-cyan-400 bg-cyan-500/10',   group: 'active',    accent: 'border-l-cyan-400' },
+  4: { label: 'Selesai',     color: 'text-buy bg-buy/10',             group: 'done',      accent: 'border-l-buy' },
+  5: { label: 'Dibatalkan',  color: 'text-surface-200 bg-surface-700', group: 'cancelled', accent: 'border-l-surface-600' },
+  6: { label: 'Invalid',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
+  7: { label: 'Ditolak',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
+  8: { label: 'Timeout',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
 };
 
 export const KYC_LABELS = { 0: 'None', 1: 'Primary', 2: 'Advanced' };
@@ -60,13 +60,13 @@ export function normalizeState(s) {
 export function OrderStateBadge({ state }) {
   const n = normalizeState(state);
   const s = ORDER_STATES[n] || { label: `State${n}`, color: 'text-surface-300 bg-surface-800' };
-  return <span className={`text-xs px-2 py-0.5 rounded-sm font-mono font-medium ${s.color}`}>{s.label}</span>;
+  return <span className={`text-[11px] px-2 py-0.5 rounded-md font-medium ${s.color}`}>{s.label}</span>;
 }
 
 export function SideBadge({ side }) {
   const isBuy = side === 'BUY';
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-sm font-mono font-bold ${isBuy ? 'text-buy bg-buy/10' : 'text-sell bg-sell/10'}`}>
+    <span className={`text-[11px] px-2 py-0.5 rounded-md font-mono font-bold tracking-wide ${isBuy ? 'text-buy bg-buy/10 ring-1 ring-buy/20' : 'text-sell bg-sell/10 ring-1 ring-sell/20'}`}>
       {side}
     </span>
   );
@@ -75,8 +75,8 @@ export function SideBadge({ side }) {
 export function AdStatusBadge({ status }) {
   const isOpen = status === 'OPEN' || status === 'open' || status === 1;
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-sm font-mono font-medium ${isOpen ? 'text-buy bg-buy/10' : 'text-surface-300 bg-surface-800'}`}>
-      {isOpen ? 'OPEN' : 'CLOSED'}
+    <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md font-medium ${isOpen ? 'text-buy bg-buy/10' : 'text-surface-300 bg-surface-900'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${isOpen ? 'bg-buy' : 'bg-surface-300'}`} />{isOpen ? 'LIVE' : 'OFF'}
     </span>
   );
 }
@@ -113,32 +113,6 @@ export function formatCompact(val) {
 }
 
 // ─── Sounds ───────────────────────────────────────────────────────────────────
-function beep(freq, dur, vol = 0.7, type = 'square', delay = 0) {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = type; osc.frequency.value = freq;
-    gain.gain.setValueAtTime(vol, ctx.currentTime + delay);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur / 1000);
-    osc.start(ctx.currentTime + delay);
-    osc.stop(ctx.currentTime + delay + dur / 1000);
-  } catch {}
-}
-
-export function playNewOrderSound() {
-  beep(880, 150, 0.8, 'square', 0);
-  beep(1100, 150, 0.8, 'square', 0.18);
-  beep(1320, 250, 0.9, 'square', 0.36);
-}
-
-export function playNewMessageSound() {
-  beep(1200, 100, 0.6, 'sine', 0);
-  beep(1500, 150, 0.6, 'sine', 0.12);
-}
-
-export function playStateChangeSound() {
-  beep(660, 120, 0.7, 'square', 0);
-  beep(880, 200, 0.8, 'square', 0.15);
-}
+// Implementation moved to src/sounds.js (shared AudioContext + soft bell tones,
+// distinct motif per order state). Re-exported here for existing imports.
+export { playSound, previewSound, soundForState, SOUND_EVENTS, getSoundPrefs, setSoundPrefs } from '../sounds';
