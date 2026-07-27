@@ -77,7 +77,7 @@ router.post('/:merchantId', authMiddleware, async (req, res) => {
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
   try {
     const result = await mexcPost('/api/v3/fiat/merchant/ads/save_or_update',
-      req.body, merchant.apiKey, merchant.apiSecret);
+      req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
     audit({ action: 'ad_save', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, side: req.body.side, price: req.body.price, code: result?.code, msg: result?.msg });
     res.json(result);
   } catch (err) {
@@ -137,7 +137,7 @@ router.post('/:merchantId/toggle-status', authMiddleware, async (req, res) => {
     console.log('[toggle] merchant:', merchant.name, 'params:', JSON.stringify(params));
 
     const result = await mexcPost('/api/v3/fiat/merchant/ads/save_or_update',
-      params, merchant.apiKey, merchant.apiSecret);
+      params, merchant.apiKey, merchant.apiSecret, { priority: true });
 
     console.log('[toggle] result:', JSON.stringify(result));
     audit({ action: 'ad_toggle', merchantId: merchant.id, merchantName: merchant.name, advNo: params.advNo, to: params.advStatus, code: result?.code, msg: result?.msg });

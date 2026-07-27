@@ -27,9 +27,9 @@ function normState(s) {
 const TERMINAL = new Set([4, 5, 6, 7, 8]); // done/cancel/invalid/refuse/timeout
 
 // Single window fetch — MEXC max 20 pages × 10 = 200 per window
-async function fetchWindow(endpoint, params, apiKey, apiSecret) {
+async function fetchWindow(endpoint, params, apiKey, apiSecret, maxPages = 20) {
   let all = [];
-  for (let page = 1; page <= 20; page++) {
+  for (let page = 1; page <= maxPages; page++) {
     let res;
     try { res = await mexcGet(endpoint, { ...params, page, limit: 10 }, apiKey, apiSecret); }
     catch (e) { console.error('[fetchWindow] err:', e.response?.data || e.message); break; }
@@ -69,15 +69,39 @@ async function fetchChunked(endpoint, baseParams, apiKey, apiSecret, startTime, 
   return all;
 }
 
+// Micro-cache for QUICK list fetches (TTL 3s) with in-flight coalescing.
+// Why: a phone and a laptop each poll every 5s, and the Antrian poller asks
+// for the same list again — without this the server forwards every one of
+// them to MEXC. With it, concurrent identical requests share ONE upstream
+// call and anything within 3s is served from memory. 3s is well under the
+// 5s poll interval, so freshness is unaffected.
+const quickCache = new Map(); // merchantId|endpoint -> { at, promise }
+const QUICK_TTL_MS = 3000;
+
+function getOrdersCached(endpoint, params, merchant, isQuick) {
+  if (!isQuick) return getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, false);
+  const key = `${merchant.id}|${endpoint}`;
+  const hit = quickCache.get(key);
+  if (hit && Date.now() - hit.at < QUICK_TTL_MS) return hit.promise;
+  const promise = getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, true)
+    .catch(err => { quickCache.delete(key); throw err; }); // never cache failures
+  quickCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
 async function getOrders(endpoint, params, apiKey, apiSecret, isQuick) {
   const now = Date.now();
   const DAY = 86400000;
 
   if (isQuick) {
-    // Quick: last 24h only — fast, for merging in auto-refresh
+    // Quick: last 24h, NEWEST FIRST, capped at 8 pages (80 orders). During a
+    // busy event an uncapped 24h window can hit 16+ pages per merchant every
+    // 5s across 3 merchants — more than the global rate gate can serve, so
+    // the queue backs up and EVERYTHING gets slow. Older rows are carried
+    // over by the client-side merge; active orders are always the newest.
     return fetchWindow(endpoint,
       { ...params, startTime: now - DAY, endTime: now },
-      apiKey, apiSecret);
+      apiKey, apiSecret, 8);
   } else {
     const start = parseInt(params.startTime || now - 7 * DAY);
     const end = parseInt(params.endTime || now);
@@ -98,9 +122,8 @@ router.get('/:merchantId/market', authMiddleware, async (req, res) => {
     const { side, orderDealState, startTime, endTime, quick } = req.query;
     const baseParams = { ...(side && { side }), ...(orderDealState && { orderDealState }) };
     const params = { ...baseParams, startTime, endTime };
-    const data = await getOrders('/api/v3/fiat/market/order/pagination',
-      params, merchant.apiKey, merchant.apiSecret, quick === 'true');
-    console.log(`[orders] ${merchant.name} quick=${quick} total=${data.length}`);
+    const data = await getOrdersCached('/api/v3/fiat/market/order/pagination',
+      params, merchant, quick === 'true');
     res.json({ code: 0, data, total: data.length });
   } catch (err) {
     console.error('[orders/market]', err.message);
@@ -114,8 +137,8 @@ router.get('/:merchantId', authMiddleware, async (req, res) => {
   try {
     const { side, orderDealState, startTime, endTime, quick } = req.query;
     const params = { ...(side && { side }), ...(orderDealState && { orderDealState }), startTime, endTime };
-    const data = await getOrders('/api/v3/fiat/merchant/order/pagination',
-      params, merchant.apiKey, merchant.apiSecret, quick === 'true');
+    const data = await getOrdersCached('/api/v3/fiat/merchant/order/pagination',
+      params, merchant, quick === 'true');
     res.json({ code: 0, data, total: data.length });
   } catch (err) { res.status(500).json({ code: -1, error: err.message }); }
 });
@@ -125,7 +148,7 @@ router.get('/:merchantId/detail/:advOrderNo', authMiddleware, async (req, res) =
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   try {
     const r = await mexcGet('/api/v3/fiat/order/detail',
-      { advOrderNo: req.params.advOrderNo }, merchant.apiKey, merchant.apiSecret);
+      { advOrderNo: req.params.advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
     res.json(r);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -136,7 +159,7 @@ router.post('/:merchantId/confirm-paid', authMiddleware, async (req, res) => {
   try {
     const r = await mexcPost('/api/v3/fiat/confirm_paid',
       { advOrderNo: req.body.advOrderNo, userConfirmPaymentId: req.body.userConfirmPaymentId },
-      merchant.apiKey, merchant.apiSecret);
+      merchant.apiKey, merchant.apiSecret, { priority: true });
     audit({ action: 'confirm_paid', merchantId: merchant.id, merchantName: merchant.name, advOrderNo: req.body.advOrderNo, code: r?.code, msg: r?.msg });
     res.json(r);
   } catch (err) {
@@ -157,7 +180,7 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
     // (Earlier this over-blocked PAID orders returned as strings → false 409.)
     let blocked = null;
     try {
-      const detail = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo }, merchant.apiKey, merchant.apiSecret);
+      const detail = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
       const st = normState(detail?.data?.state);
       if (TERMINAL.has(st)) {
         const names = { 4: 'already completed', 5: 'cancelled', 6: 'invalid', 7: 'refused', 8: 'timed out' };
@@ -170,7 +193,7 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
       return res.status(409).json({ code: -1, msg: `Can't release: order is ${blocked}.` });
     }
 
-    const r = await mexcPost('/api/v3/fiat/release_coin', { advOrderNo }, merchant.apiKey, merchant.apiSecret);
+    const r = await mexcPost('/api/v3/fiat/release_coin', { advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
     audit({ action: 'release_coin', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, code: r?.code, msg: r?.msg });
     res.json(r);
   } catch (err) {
@@ -184,7 +207,7 @@ router.post('/:merchantId/create', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   try {
-    const r = await mexcPost('/api/v3/fiat/merchant/order/deal', req.body, merchant.apiKey, merchant.apiSecret);
+    const r = await mexcPost('/api/v3/fiat/merchant/order/deal', req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
     res.json(r);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

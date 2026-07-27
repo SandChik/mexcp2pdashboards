@@ -1,6 +1,5 @@
 import { ordersApi } from './api';
 import { askConfirm } from './components/confirm';
-import { addNotif } from './notifications';
 import { formatAmount, normalizeState, ORDER_STATES } from './components/helpers';
 import toast from 'react-hot-toast';
 
@@ -68,12 +67,28 @@ async function verifyWithDetail(merchantId, advOrderNo, intent) {
 export async function releaseOrder(merchantId, order, { skipConfirm = false } = {}) {
   const qty = `${formatAmount(order.tradableQuantity, 8)} ${order.coinName || 'USDT'}`;
   const amt = `${formatAmount(order.amount, 0)} ${order.fiatUnit || ''}`;
-  const who = order.userInfo?.nickName || 'buyer';
+  const nick = order.userInfo?.nickName || 'buyer';
+
+  // Verify BEFORE asking, so the dialog can show the buyer's KYC name — that is
+  // the name you match against the sender on your bank statement, and it only
+  // exists on the detail payload.
+  const v = await verifyWithDetail(merchantId, order.advOrderNo, 'release');
+  if (!v.ok) { toast.error(v.reason); return false; }
+  const realName = v.detail?.userInfo?.realName || null;
+  const pay = v.detail?.confirmPaymentInfo || v.detail?.paymentInfo?.[0] || null;
 
   if (!skipConfirm) {
+    const lines = [
+      realName ? `Nama KYC : ${realName}` : null,
+      `Nickname : ${nick}`,
+      `Dia bayar: ${amt}`,
+      pay?.account ? `Ke rek.  : ${pay.account}` : null,
+      '',
+      'Pastikan dana SUDAH benar-benar masuk ke rekening Anda dan nama pengirim cocok. Aksi ini tidak bisa dibatalkan.',
+    ].filter(l => l !== null);
     const ok = await askConfirm({
       title: `Release ${qty}?`,
-      message: `Ke: ${who}\nDia bayar: ${amt}\n\nPastikan dana SUDAH benar-benar masuk ke rekening Anda. Aksi ini tidak bisa dibatalkan.`,
+      message: lines.join('\n'),
       confirmText: 'Release coin',
       danger: true,
     });
@@ -81,12 +96,9 @@ export async function releaseOrder(merchantId, order, { skipConfirm = false } = 
   }
 
   try {
-    const v = await verifyWithDetail(merchantId, order.advOrderNo, 'release');
-    if (!v.ok) { toast.error(v.reason); return false; }
     const r = await ordersApi.releaseCoin(merchantId, order.advOrderNo);
     if (r.data?.code === 0) {
       toast.success(`Coin dilepas — ${amt}`);
-      addNotif('Released', `Release ${qty} untuk ${who}`);
       return true;
     }
     toast.error('Gagal: ' + (r.data?.msg || 'Error'));
@@ -127,7 +139,6 @@ export async function confirmPaidOrder(merchantId, order, { skipConfirm = false 
     const r = await ordersApi.confirmPaid(merchantId, order.advOrderNo, parseInt(payId));
     if (r.data?.code === 0) {
       toast.success(`Pembayaran dikonfirmasi — ${amt}`);
-      addNotif('Confirmed', `Konfirmasi bayar ${amt} ke ${who}`);
       return true;
     }
     toast.error('Gagal: ' + (r.data?.msg || 'Error'));

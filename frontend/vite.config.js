@@ -9,6 +9,12 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true
+      },
+      // Version probe lives outside /api — proxy it too so the dev server can
+      // report the backend version instead of showing "gagal dibaca".
+      '/health': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

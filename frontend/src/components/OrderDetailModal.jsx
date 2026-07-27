@@ -4,7 +4,6 @@ import { ordersApi, chatApi, merchantApi } from '../api';
 import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, KYC_LABELS, getBankName } from './helpers';
 import toast from 'react-hot-toast';
 import { askConfirm } from './confirm';
-import { addNotif } from '../notifications';
 
 export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 'detail', onClose, onActionDone }) {
   // Escape always exits the modal (heuristic #3: user control & freedom)
@@ -157,13 +156,22 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
   async function handleReleaseCoin() {
     const amt = order ? `${formatAmount(order.amount, 0)} ${order.fiatUnit}` : '';
     const qty = order ? `${formatAmount(order.tradableQuantity, 8)} ${order.coinName || 'USDT'}` : '';
-    const who = order?.userInfo?.nickName || 'buyer';
-    const ok = await askConfirm({ title: `Release ${qty}?`, message: `To: ${who}\nThey paid: ${amt}\n\nConfirm you have ACTUALLY received this payment in your account. This action is irreversible.`, confirmText: 'Release coin', danger: true });
+    const nick = order?.userInfo?.nickName || 'buyer';
+    const realName = order?.userInfo?.realName || null;
+    const pay = order?.confirmPaymentInfo || order?.paymentInfo?.[0] || null;
+    const lines = [
+      realName ? `Nama KYC : ${realName}` : null,
+      `Nickname : ${nick}`,
+      `Dia bayar: ${amt}`,
+      pay?.account ? `Ke rek.  : ${pay.account}` : null,
+      '',
+      'Pastikan dana SUDAH benar-benar masuk ke rekening Anda dan nama pengirim cocok. Aksi ini tidak bisa dibatalkan.',
+    ].filter(l => l !== null);
+    const ok = await askConfirm({ title: `Release ${qty}?`, message: lines.join('\n'), confirmText: 'Release coin', danger: true });
     if (!ok) return;
     setActionLoading('release');
     try {
       const r = await ordersApi.releaseCoin(merchantId, advOrderNo);
-      if (r.data?.code === 0) addNotif('Released', `Coin released for order ${advOrderNo}`);
       if (r.data?.code === 0) {
         toast.success('\u2705 Coin dilepas!');
         loadDetail(); onActionDone?.();

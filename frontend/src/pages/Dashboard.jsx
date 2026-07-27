@@ -3,7 +3,6 @@ import { merchantApi } from '../api';
 import MerchantPanel from '../components/MerchantPanel';
 import Layout from '../components/Layout';
 import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X, Bell } from 'lucide-react';
-import NotificationBell from '../components/NotificationBell';
 import { subscribeQueue, getActiveByMerchant } from '../actionQueue';
 import { useNavigate } from 'react-router-dom';
 
@@ -177,7 +176,6 @@ export default function Dashboard() {
                 {showDate && <div className="hidden sm:block absolute right-0 top-10 z-40">{datePanel}</div>}
               </div>
 
-              <NotificationBell />
 
               <button onClick={() => setAutoRefresh(a => !a)}
                 title="Auto-refresh data tiap 5 detik (ini TIDAK menghentikan trading)"

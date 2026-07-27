@@ -93,7 +93,7 @@ router.post('/:id/service-switch', authMiddleware, async (req, res) => {
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
   try {
     const result = await mexcPost('/api/v3/fiat/merchant/service/switch',
-      { open: req.body.open }, merchant.apiKey, merchant.apiSecret);
+      { open: req.body.open }, merchant.apiKey, merchant.apiSecret, { priority: true });
     audit({ action: 'service_switch', merchantId: merchant.id, merchantName: merchant.name, open: req.body.open, code: result?.code, msg: result?.msg });
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -104,7 +104,7 @@ router.get('/:id/balance', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.id);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
   try {
-    const result = await mexcGet('/api/v3/account', {}, merchant.apiKey, merchant.apiSecret);
+    const result = await mexcGet('/api/v3/account', {}, merchant.apiKey, merchant.apiSecret, { priority: true });
     const usdt = (result.balances || []).find(b => b.asset === 'USDT');
     res.json({ free: usdt?.free || '0', locked: usdt?.locked || '0' });
   } catch (err) { res.status(500).json({ error: err.message }); }

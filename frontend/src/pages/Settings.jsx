@@ -3,6 +3,7 @@ import { merchantApi, authApi } from '../api';
 import Layout from '../components/Layout';
 import MessageSettings from '../components/MessageSettings';
 import SoundSettings from '../components/SoundSettings';
+import VersionInfo from '../components/VersionInfo';
 import { Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Key } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { askConfirm } from '../components/confirm';
@@ -283,6 +284,8 @@ export default function Settings() {
           <MessageSettings />
 
           <SoundSettings />
+
+          <VersionInfo />
 
           <div className="bg-surface-800/50 border border-surface-200/5 rounded-xl p-4 text-xs text-surface-200/30 font-mono space-y-1">
             <p>• API keys are stored locally on your machine</p>

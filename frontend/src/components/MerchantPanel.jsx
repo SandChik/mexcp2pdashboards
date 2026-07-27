@@ -7,7 +7,6 @@ import {
 import { playSound, soundForState } from '../sounds';
 import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
-import { addNotif } from '../notifications';
 import OrderDetailModal from './OrderDetailModal';
 import AdModal from './AdModal';
 import {
@@ -68,6 +67,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const initialized = useRef(false);
   const busyRef     = useRef(false);
   const rangeRef    = useRef(dateRange);
+  const ordersRef   = useRef([]);
   const menuRef     = useRef(null);
   const nameMapRef  = useRef({});
   const capturedRef = useRef(new Set());
@@ -86,15 +86,27 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       const cr = await chatApi.getConversation(merchant.id, o.advOrderNo);
       const cid = cr.data?.data?.conversationId || cr.data?.conversationId || cr.data?.data?.id;
       if (!cid) throw new Error('no conversation id');
+
+      // Last line of defence, checked against REALITY rather than bookkeeping:
+      // if this exact text is already in the conversation from us, don't send
+      // it again. The server claim ledger stops the common cases (two devices,
+      // evicted local cache); this also covers the ones it can't see — a second
+      // backend still running somewhere, or a send that actually succeeded but
+      // reported a network failure and got retried.
+      try {
+        const hist = await chatApi.getMessages(merchant.id, cid, { page: 1, limit: 30, sort: 'DESC' });
+        const msgs = hist.data?.data?.messages || hist.data?.messages || [];
+        const target = text.trim();
+        if (msgs.some(m => m.self && String(m.content || '').trim() === target)) return; // already there
+      } catch { /* can't verify → fall through; the claim ledger still guards */ }
+
       await chatApi.connect(merchant.id, cid).catch(() => {});
       await chatApi.send(merchant.id, cid, text);
-      addNotif('Auto-reply', `${merchant.name} — ${o.userInfo?.nickName || 'buyer'}: ${text.slice(0, 45)}${text.length > 45 ? '…' : ''}`);
     } catch (e) {
       // Hand the claim back so a later poll can retry — otherwise a transient
       // network error would silently swallow the message forever.
       autoSentRef.current.delete(sk); persistAutoSent();
       autoReplyApi.release(merchant.id, o.advOrderNo, [rule.id]).catch(() => {});
-      addNotif('Auto-reply failed', `${merchant.name} — ${o.userInfo?.nickName || 'buyer'}: ${e?.response?.data?.error || e?.message || 'send error'}`);
     }
   }
 
@@ -146,7 +158,14 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   // shown on each row now, not just when the buyer log is on.
   useEffect(() => {
     if (orders.length === 0) return;
-    const missing = orders.map(o => o.advOrderNo).filter(no => no && !(no in nameMapRef.current));
+    // Active orders first (their name matters for the duplicate alert BEFORE
+    // release), then recent history — capped so a 150-order range doesn't
+    // dump 150 detail fetches into the gate at once. The cache fills up over
+    // successive polls instead.
+    const pending = orders.filter(o => o.advOrderNo && !(o.advOrderNo in nameMapRef.current));
+    const active = pending.filter(o => [0, 1, 2, 3].includes(o._state));
+    const rest = pending.filter(o => ![0, 1, 2, 3].includes(o._state));
+    const missing = active.concat(rest).slice(0, 30).map(o => o.advOrderNo);
     if (missing.length === 0) return;
     let cancelled = false;
     ordersApi.memberIds(merchant.id, missing).then(r => {
@@ -163,21 +182,39 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   // 1s tick to drive countdown timers
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
-  const doFetch = useCallback(async (quiet = false) => {
+  // quick=true → only re-fetch the last 24h (2-3 pages) and MERGE into what we
+  // already have, instead of re-paginating the whole date range every 5s.
+  // Safe because anything older than 24h is in a terminal state and can never
+  // change again; only recent orders move. On an event-week range this cuts
+  // steady-state polling from ~16 pages to ~3 per merchant — which is what was
+  // keeping the MEXC rate-limit gate saturated and every click slow.
+  const doFetch = useCallback(async (quiet = false, quick = false) => {
     if (busyRef.current) return;
     busyRef.current = true;
     if (!quiet) setRefreshing(true);
     try {
-      const r = await ordersApi.market(merchant.id, {
+      const params = {
         startTime: rangeRef.current.startTime,
         // Live presets (today/event/3d/7d) must always query up to NOW, or new
         // orders created after the dashboard opened fall outside the window and
         // never get detected. Only a fixed custom range uses its chosen end.
         endTime: rangeRef.current.kind === 'custom' ? rangeRef.current.endTime : Date.now(),
-      });
+      };
+      const r = quick
+        ? await ordersApi.marketQuick(merchant.id, params)
+        : await ordersApi.market(merchant.id, params);
       const raw = r.data;
       const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-      const normalized = list.map(o => ({ ...o, _state: normalizeState(o.state) }));
+      let normalized = list.map(o => ({ ...o, _state: normalizeState(o.state) }));
+      if (quick) {
+        // Merge: fresh rows win; anything outside the 24h window is carried
+        // over untouched, then clipped to the selected range.
+        const fresh = new Set(normalized.map(o => o.advOrderNo));
+        const kept = ordersRef.current.filter(o => !fresh.has(o.advOrderNo));
+        normalized = normalized.concat(kept)
+          .filter(o => (o.createTime || 0) >= rangeRef.current.startTime)
+          .sort((a, b) => (b.createTime || 0) - (a.createTime || 0));
+      }
 
       if (initialized.current) {
         let newActive = 0, prevActive = 0;
@@ -189,12 +226,10 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
             if (ev) playSound(ev);
             const sc = `${o.userInfo?.nickName || 'Order'}: ${ORDER_STATES[ps]?.label || ps} → ${ORDER_STATES[o._state]?.label || o._state}`;
             toast(sc, { duration: 5000 });
-            addNotif('Order', `${merchant.name} — ${sc}`);
           }
           if (pu !== undefined && (o.unreadCount || 0) > pu) {
             playSound('message');
             toast(`${o.userInfo?.nickName || 'Buyer'}: new message`, { duration: 3000 });
-            addNotif('Message', `${merchant.name} — ${o.userInfo?.nickName || 'Buyer'}: new message`);
           }
           if ([0, 1, 2, 3].includes(o._state)) newActive++;
           const no = o.advOrderNo;
@@ -202,7 +237,6 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           if (ps === undefined) {
             enteredRef.current.add(`${no}:new`);              // first time we ever see this order
             enteredRef.current.add(`${no}:${o._state}`);
-            addNotif('New order', `${merchant.name} — ${o.userInfo?.nickName || 'order'}: ${ORDER_STATES[o._state]?.label || o._state}`);
           } else if (ps !== o._state) {
             enteredRef.current.add(`${no}:${o._state}`);
           }
@@ -223,6 +257,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       const ns = {}, nu = {};
       normalized.forEach(o => { ns[o.advOrderNo] = o._state; nu[o.advOrderNo] = o.unreadCount || 0; });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
+      ordersRef.current = normalized;
       setOrders(normalized); setLastSync(Date.now()); setSyncError(false); syncErrorRef.current = false;
     } catch (e) {
       // Sound only on the transition into an error state, not every 5s poll.
@@ -281,7 +316,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const o = setInterval(() => doFetch(true), 5000);
+    const o = setInterval(() => doFetch(true, true), 5000);
     const a = setInterval(() => fetchAds(), 30000);
     return () => { clearInterval(o); clearInterval(a); };
   }, [doFetch, fetchAds, autoRefresh]);
@@ -344,6 +379,25 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     try { await merchantApi.serviceSwitch(merchant.id, open); setServiceOpen(open); toast.success(open ? 'Merchant open' : 'Merchant closed'); }
     catch { toast.error('Switch failed'); }
     setMenuOpen(false);
+  }
+
+  // Inline action straight from the list — same confirmation dialog as the
+  // modal, minus opening and closing it.
+  async function rowAction(order, e) {
+    e?.stopPropagation();
+    if (rowBusy) return;
+    setRowBusy(order.advOrderNo);
+    try {
+      const ok = await runAction(merchant.id, order);
+      if (ok) {
+        setRowDone(order.advOrderNo);
+        setTimeout(() => setRowDone(null), 1200);
+        // Quick merge, NOT a full range refetch — a full "event week" fetch is
+        // dozens of low-priority requests (3-6s). The just-changed order is in
+        // the newest 24h by definition, so quick always sees it.
+        doFetch(false, true);
+      }
+    } finally { setRowBusy(null); }
   }
 
   async function toggleBuyerLog() {
@@ -420,7 +474,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       }
       try { await merchantApi.setPauseState(merchant.id, true, closed); } catch { /* */ }
       setPausedAds(closed); fetchAds();
-      if (failed.length === 0) { toast.success(`Paused ${merchant.name} — closed ${closed.length} ad(s)`, { id: tid }); addNotif('Paused', `${merchant.name} — ${closed.length} ad(s) closed`); }
+      if (failed.length === 0) { toast.success(`Paused ${merchant.name} — closed ${closed.length} ad(s)`, { id: tid }); }
       else toast.error(`Closed ${closed.length}, ${failed.length} failed: ${failed.map(f => `@${f.price} (${f.msg})`).join(', ')}`, { id: tid, duration: 10000 });
     } finally { setBusyTrading(false); }
   }
@@ -459,7 +513,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       // Keep ONLY the failed ads in the snapshot so they stay tracked & resumable.
       await merchantApi.setPauseState(merchant.id, failedNos.length > 0, failedNos).catch(() => {});
       setPausedAds(failedNos); fetchAds();
-      if (failed.length === 0) { toast.success(`Resumed ${merchant.name} — ${ok} ad(s) live`, { id: tid }); addNotif('Resumed', `${merchant.name} — ${ok} ad(s) back live`); }
+      if (failed.length === 0) { toast.success(`Resumed ${merchant.name} — ${ok} ad(s) live`, { id: tid }); }
       else toast.error(`Resumed ${ok}. ${failed.length} still paused (tap Resume again): ${failed.map(f => `@${f.price} (${f.msg})`).join(', ')}`, { id: tid, duration: 12000 });
     } finally { setBusyTrading(false); }
   }
@@ -707,8 +761,8 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       {(selectedOrder || openChatOrder) && (
         <OrderDetailModal merchantId={merchant.id} advOrderNo={selectedOrder || openChatOrder}
           initialTab={openChatOrder && !selectedOrder ? 'chat' : 'detail'}
-          onClose={() => { setSelectedOrder(null); setOpenChatOrder(null); doFetch(false); fetchAds(); }}
-          onActionDone={() => doFetch(false)} />
+          onClose={() => { setSelectedOrder(null); setOpenChatOrder(null); doFetch(false, true); fetchAds(); }}
+          onActionDone={() => doFetch(false, true)} />
       )}
       {showAdModal && editAd && (
         <AdModal merchantId={merchant.id} existingAd={editAd}

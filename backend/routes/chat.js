@@ -18,7 +18,7 @@ router.get('/:mid/conversation/:orderNo', authMiddleware, async (req, res) => {
   const m = getMerchant(req.params.mid);
   if (!m) return res.status(404).json({ error: 'Merchant not found' });
   try {
-    const r = await mexcGet('/api/v3/fiat/retrieveChatConversation', { orderNo: req.params.orderNo }, m.apiKey, m.apiSecret);
+    const r = await mexcGet('/api/v3/fiat/retrieveChatConversation', { orderNo: req.params.orderNo }, m.apiKey, m.apiSecret, { priority: true });
     res.json(r);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -28,10 +28,10 @@ router.get('/:mid/messages/:cid', authMiddleware, async (req, res) => {
   const m = getMerchant(req.params.mid);
   if (!m) return res.status(404).json({ error: 'Merchant not found' });
   try {
-    const { page = 1, limit = 50 } = req.query;
+    const { page = 1, limit = 50, sort = 'ASC' } = req.query;
     const r = await mexcGet(
       '/api/v3/fiat/retrieveChatMessageWithPagination',
-      { conversationId: req.params.cid, page, limit, sort: 'ASC' },
+      { conversationId: req.params.cid, page, limit, sort },
       m.apiKey, m.apiSecret
     );
     res.json(r);

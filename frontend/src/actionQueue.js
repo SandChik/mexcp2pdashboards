@@ -14,7 +14,7 @@ import { actionFor } from './actions';
  */
 
 const POLL_MS = 15000;
-const WINDOW_MS = 2 * 86400000; // actionable orders are always recent
+const WINDOW_MS = 86400000; // 24h — actionable orders are minutes old, never days
 
 let items = [];
 let activeByMerchant = {};   // merchantId -> count of orders still running (state 0..3)
@@ -45,7 +45,11 @@ export async function refreshQueue() {
     const now = Date.now();
     const results = await Promise.all(merchants.map(async (m) => {
       try {
-        const r = await ordersApi.market(m.id, { startTime: now - WINDOW_MS, endTime: now });
+        // Quick path: shares the server-side 3s cache with the panels' own
+        // polling, so this poller usually costs ZERO extra MEXC requests.
+        // Actionable orders have minute-scale deadlines — the 24h quick
+        // window always contains them.
+        const r = await ordersApi.marketQuick(m.id, { startTime: now - WINDOW_MS, endTime: now });
         const raw = r.data;
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
         const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name }));

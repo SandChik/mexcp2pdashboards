@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -29,6 +30,7 @@ if (!fs.existsSync(configPath)) {
 }
 
 app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:5173'] }));
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -41,7 +43,11 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/registry', registryRoutes);
 app.use('/api/autoreply', autoreplyRoutes);
 
-app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
+// Single source of truth for "what is actually running". Shown in Settings and
+// printed at boot, so a stale build can be spotted in seconds instead of by
+// grepping source files on the server.
+const APP_VERSION = 'v45';
+app.get('/health', (req, res) => res.json({ status: 'ok', version: APP_VERSION, timestamp: Date.now() }));
 
 // Optionally serve the built frontend (frontend/dist) from this same process,
 // so production deploys (VPS) can run ONE process on ONE origin — no CORS,
@@ -60,7 +66,7 @@ if (fs.existsSync(distIndex)) {
 // firewall (ufw) restrict inbound access to the VPN's subnet only.
 const HOST = process.env.HOST || '127.0.0.1';
 app.listen(PORT, HOST, () => {
-  console.log(`MEXC Dashboard Backend running on http://${HOST}:${PORT}`);
+  console.log(`MEXC Dashboard Backend ${APP_VERSION} running on http://${HOST}:${PORT}`);
   // 24/7 read-only capture (FTD snapshots + buyer log) — runs server-side so
   // event data stays complete even with every browser closed. CAPTURE_WORKER=0 to disable.
   require('./utils/captureWorker').start();
