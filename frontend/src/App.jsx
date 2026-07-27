@@ -8,6 +8,7 @@ import UUReport from './pages/UUReport';
 import FTDReport from './pages/FTDReport';
 import BuyerLog from './pages/BuyerLog';
 import ActionQueue from './pages/ActionQueue';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function ProtectedRoute({ children }) {
   const { isAuth } = useAuth();
@@ -17,6 +18,7 @@ function ProtectedRoute({ children }) {
 function AppRoutes() {
   const { isAuth } = useAuth();
   return (
+    <ErrorBoundary>
     <Routes>
       <Route path="/login" element={isAuth ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -27,6 +29,7 @@ function AppRoutes() {
       <Route path="/queue" element={<ProtectedRoute><ActionQueue /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </ErrorBoundary>
   );
 }
 
