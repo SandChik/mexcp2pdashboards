@@ -52,3 +52,6 @@ for (const route of routes) {
   console.log(`${ok ? 'OK  ' : 'GAGAL'} ${route.padEnd(10)} ${blank ? 'BLANK' : (crashed ? 'CRASH → ' + (html.match(/<pre[^>]*>([^<]{0,90})/)?.[1]||'').trim() : html.length + ' char')}`);
 }
 console.log(bad ? `\n${bad} halaman bermasalah` : '\nSemua halaman render tanpa crash');
+
+// Exit code is what the CI gate actually reads — printing "GAGAL" is not enough.
+process.exit(bad ? 1 : 0);
