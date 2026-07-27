@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { merchantApi, ordersApi } from '../api';
 import Layout from '../components/Layout';
+import { downloadCsv, stamp } from '../csv';
 import { formatAmount, normalizeState } from '../components/helpers';
-import { Users, RefreshCw, CalendarRange, AlertTriangle } from 'lucide-react';
+import { Users, RefreshCw, CalendarRange, AlertTriangle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const DAY = 86400000;
@@ -97,6 +98,12 @@ export default function UUReport() {
 
   const card = 'bg-surface-800 border border-surface-700 rounded-lg p-4';
 
+  function exportCsv() {
+    downloadCsv(`unique-users-${stamp()}.csv`,
+      ['No', 'UID', 'Nickname', 'Jumlah order', 'Total USDT'],
+      view.rows.map((u, i) => [i + 1, u.memberId || '', u.nickName || '', u.orders, u.usdt]));
+  }
+
   return (
     <Layout>
       <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
@@ -144,6 +151,10 @@ export default function UUReport() {
                 <input type="number" min="0" step="any" value={minBuy} onChange={e => setMinBuy(e.target.value)} placeholder="0"
                   className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-sm text-surface-50 font-mono focus:outline-none focus:border-brand-500 w-[130px]" />
               </div>
+                <button onClick={exportCsv} disabled={view.rows.length === 0}
+                  className="flex items-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-40">
+                  <Download size={13} /> CSV
+                </button>
               <button onClick={calculate} disabled={loading}
                 className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium rounded-md px-5 py-2 flex items-center gap-2 transition-colors">
                 {loading ? <RefreshCw size={15} className="animate-spin" /> : <Users size={15} />}{loading ? 'Calculating…' : 'Calculate UU'}

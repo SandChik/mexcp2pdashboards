@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ordersApi, adsApi, merchantApi, chatApi, registryApi, autoReplyApi } from '../api';
+import { ordersApi, adsApi, merchantApi, chatApi, registryApi } from '../api';
 import {
   OrderStateBadge, SideBadge, AdStatusBadge, formatTime, formatAmount, formatCompact,
   ORDER_STATES, normalizeState,
 } from './helpers';
 import { playSound, soundForState } from '../sounds';
+import { shouldAnnounce } from '../announce';
 import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
 import OrderDetailModal from './OrderDetailModal';
@@ -59,7 +60,6 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const autoReplyEnabledRef = useRef(true);
   useEffect(() => { autoReplyEnabledRef.current = autoReplyEnabled; }, [autoReplyEnabled]);
-  const autoRulesRef = useRef([]); // per-merchant auto-reply rules (from merchant settings)
   const [nameMap, setNameMap]         = useState({}); // advOrderNo -> { realName, memberId }
 
   const prevStates  = useRef({});
@@ -72,122 +72,11 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const nameMapRef  = useRef({});
   const capturedRef = useRef(new Set());
   const loggedRef   = useRef(new Set()); // advOrderNos already sent to the buyer log
-  const enteredRef  = useRef(new Set()); // advOrderNo:state we've witnessed entering (for auto-reply retry)
-  const AUTOSENT_KEY = 'mexc_autosent';
-  const autoSentRef = useRef(new Set((() => { try { return JSON.parse(localStorage.getItem(AUTOSENT_KEY)) || []; } catch { return []; } })()));
-  const persistAutoSent = () => { try { localStorage.setItem(AUTOSENT_KEY, JSON.stringify([...autoSentRef.current].slice(-500))); } catch { /* */ } };
 
-  async function autoSend(o, rule) {
-    const text = rule.message;
-    if (!text || !text.trim()) return;
-    const sk = `${o.advOrderNo}:${rule.id}`;
-    autoSentRef.current.add(sk); persistAutoSent();
-    try {
-      const cr = await chatApi.getConversation(merchant.id, o.advOrderNo);
-      const cid = cr.data?.data?.conversationId || cr.data?.conversationId || cr.data?.data?.id;
-      if (!cid) throw new Error('no conversation id');
+  // Auto-reply now runs in the backend worker (utils/autoReplyWorker.js): one
+  // sender, always on, unaffected by a suspended phone tab. Sending from the
+  // browser as well would put two senders back in play.
 
-      // Last line of defence, checked against REALITY rather than bookkeeping:
-      // if this exact text is already in the conversation from us, don't send
-      // it again. The server claim ledger stops the common cases (two devices,
-      // evicted local cache); this also covers the ones it can't see — a second
-      // backend still running somewhere, or a send that actually succeeded but
-      // reported a network failure and got retried.
-      try {
-        const hist = await chatApi.getMessages(merchant.id, cid, { page: 1, limit: 30, sort: 'DESC' });
-        const msgs = hist.data?.data?.messages || hist.data?.messages || [];
-        const target = text.trim();
-        if (msgs.some(m => m.self && String(m.content || '').trim() === target)) return; // already there
-      } catch { /* can't verify → fall through; the claim ledger still guards */ }
-
-      await chatApi.connect(merchant.id, cid).catch(() => {});
-      await chatApi.send(merchant.id, cid, text);
-    } catch (e) {
-      // Hand the claim back so a later poll can retry — otherwise a transient
-      // network error would silently swallow the message forever.
-      autoSentRef.current.delete(sk); persistAutoSent();
-      autoReplyApi.release(merchant.id, o.advOrderNo, [rule.id]).catch(() => {});
-    }
-  }
-
-  // Send multiple matching rules one-by-one (in order) so they don't collide.
-  //
-  // The local ledger (localStorage) is only a fast path — it is per browser, so
-  // a phone and a laptop each thought they were first and both sent. The server
-  // grants every (order, rule) exactly once across all devices; we send only
-  // what it grants.
-  async function autoSendSequential(o, rules) {
-    let granted;
-    try {
-      const r = await autoReplyApi.claim(merchant.id, o.advOrderNo, rules.map(x => x.id));
-      const ok = new Set(r.data?.granted || []);
-      granted = rules.filter(x => ok.has(x.id));
-      // Remember what the server refused so we stop re-asking every poll.
-      const refused = rules.filter(x => !ok.has(x.id));
-      if (refused.length) {
-        refused.forEach(x => autoSentRef.current.add(`${o.advOrderNo}:${x.id}`));
-        persistAutoSent();
-      }
-    } catch {
-      return; // Can't verify → stay silent. A missed greeting beats a double one.
-    }
-    for (const rule of granted) {
-      await autoSend(o, rule);
-      await new Promise(res => setTimeout(res, 900));
-    }
-  }
-
-  useEffect(() => { rangeRef.current = dateRange; }, [dateRange]);
-
-  // Per-merchant settings: buyer log toggle + auto-reply (enabled flag AND rules
-  // now live per merchant on the backend — no longer global localStorage).
-  useEffect(() => { merchantApi.getSettings(merchant.id).then(r => {
-    setBuyerLog(!!r.data?.buyerLog);
-    setAutoReplyEnabled(r.data?.autoReplyEnabled !== false); // default ON
-    autoRulesRef.current = Array.isArray(r.data?.autoReplyRules) ? r.data.autoReplyRules : [];
-  }).catch(() => {}); }, [merchant.id]);
-
-  // Load the permanent buyer-name index for duplicate alerts
-  const loadNameIndex = useCallback(async () => {
-    try { const r = await registryApi.list(merchant.id); setLogNameIndex(r.data?.nameIndex || {}); }
-    catch { /* keep last */ }
-  }, [merchant.id]);
-  useEffect(() => { if (buyerLog) loadNameIndex(); }, [buyerLog, loadNameIndex]);
-
-  // Resolve real names (cached server-side) for every order — the KYC name is
-  // shown on each row now, not just when the buyer log is on.
-  useEffect(() => {
-    if (orders.length === 0) return;
-    // Active orders first (their name matters for the duplicate alert BEFORE
-    // release), then recent history — capped so a 150-order range doesn't
-    // dump 150 detail fetches into the gate at once. The cache fills up over
-    // successive polls instead.
-    const pending = orders.filter(o => o.advOrderNo && !(o.advOrderNo in nameMapRef.current));
-    const active = pending.filter(o => [0, 1, 2, 3].includes(o._state));
-    const rest = pending.filter(o => ![0, 1, 2, 3].includes(o._state));
-    const missing = active.concat(rest).slice(0, 30).map(o => o.advOrderNo);
-    if (missing.length === 0) return;
-    let cancelled = false;
-    ordersApi.memberIds(merchant.id, missing).then(r => {
-      if (cancelled) return;
-      const map = r.data?.map || {};
-      setNameMap(prev => { const next = { ...prev, ...map }; nameMapRef.current = next; return next; });
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [orders, merchant.id]);
-
-  // Load remembered pause state for this merchant
-  useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
-
-  // 1s tick to drive countdown timers
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-
-  // quick=true → only re-fetch the last 24h (2-3 pages) and MERGE into what we
-  // already have, instead of re-paginating the whole date range every 5s.
-  // Safe because anything older than 24h is in a terminal state and can never
-  // change again; only recent orders move. On an event-week range this cuts
-  // steady-state polling from ~16 pages to ~3 per merchant — which is what was
-  // keeping the MEXC rate-limit gate saturated and every click slow.
   const doFetch = useCallback(async (quiet = false, quick = false) => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -221,37 +110,25 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         normalized.forEach(o => {
           const ps = prevStates.current[o.advOrderNo];
           const pu = prevUnread.current[o.advOrderNo];
-          if (ps !== undefined && ps !== o._state) {
+          // shouldAnnounce keeps other tabs of the same browser quiet — the
+          // first tab to see an event claims it, the rest skip.
+          if (ps !== undefined && ps !== o._state
+              && shouldAnnounce(`st:${merchant.id}:${o.advOrderNo}:${o._state}`)) {
             const ev = soundForState(o._state); // paid / done / cancelled — silent for intermediate states
             if (ev) playSound(ev);
-            const sc = `${o.userInfo?.nickName || 'Order'}: ${ORDER_STATES[ps]?.label || ps} → ${ORDER_STATES[o._state]?.label || o._state}`;
-            toast(sc, { duration: 5000 });
+            toast(`${o.userInfo?.nickName || 'Order'}: ${ORDER_STATES[ps]?.label || ps} → ${ORDER_STATES[o._state]?.label || o._state}`, { duration: 5000 });
           }
-          if (pu !== undefined && (o.unreadCount || 0) > pu) {
+          if (pu !== undefined && (o.unreadCount || 0) > pu
+              && shouldAnnounce(`msg:${merchant.id}:${o.advOrderNo}:${o.unreadCount}`)) {
             playSound('message');
-            toast(`${o.userInfo?.nickName || 'Buyer'}: new message`, { duration: 3000 });
+            toast(`${o.userInfo?.nickName || 'Buyer'}: pesan baru`, { duration: 3000 });
           }
           if ([0, 1, 2, 3].includes(o._state)) newActive++;
-          const no = o.advOrderNo;
-          // Witness entries (kept across polls so we can retry until the send succeeds).
-          if (ps === undefined) {
-            enteredRef.current.add(`${no}:new`);              // first time we ever see this order
-            enteredRef.current.add(`${no}:${o._state}`);
-          } else if (ps !== o._state) {
-            enteredRef.current.add(`${no}:${o._state}`);
-          }
-          if (autoReplyEnabledRef.current) {
-            const matched = (autoRulesRef.current || []).filter(rule => {
-              if (rule.side !== 'ANY' && rule.side !== o.side) return false;
-              if (autoSentRef.current.has(`${no}:${rule.id}`)) return false;
-              if (rule.state === -1) return enteredRef.current.has(`${no}:new`);          // greet on arrival, any status
-              return rule.state === o._state && enteredRef.current.has(`${no}:${o._state}`);
-            });
-            if (matched.length) autoSendSequential(o, matched);
-          }
         });
         Object.values(prevStates.current).forEach(s => { if ([0, 1, 2, 3].includes(s)) prevActive++; });
-        if (newActive > prevActive) { playSound('newOrder'); toast.success(`New order — ${merchant.name}`, { duration: 4000 }); }
+        if (newActive > prevActive && shouldAnnounce(`new:${merchant.id}:${newActive}`, 8000)) {
+          playSound('newOrder'); toast.success(`Order baru — ${merchant.name}`, { duration: 4000 });
+        }
       }
 
       const ns = {}, nu = {};
@@ -655,6 +532,13 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <SideBadge side={order.side} />
                         <OrderStateBadge state={order._state} />
+                      {order.unreadCount > 0 && (
+                        <button onClick={e => { e.stopPropagation(); setOpenChatOrder(order.advOrderNo); }}
+                          title={`${order.unreadCount} pesan belum dibaca — buka chat`}
+                          className="inline-flex items-center gap-0.5 text-[11px] font-semibold rounded-md px-1.5 py-0.5 bg-sell/15 text-sell hover:bg-sell/25 transition-colors">
+                          <MessageSquare size={10} />{order.unreadCount}
+                        </button>
+                      )}
                         {dup && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full pl-1.5 pr-2 py-0.5 bg-sell/15 text-sell ring-1 ring-sell/30"
                             title={`Nama KYC "${dup.name}" tercatat di ${dup.count} order (termasuk riwayat di Catatan Buyer) — kemungkinan 1 KTP banyak akun`}>
@@ -703,12 +587,6 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                     </div>
                   );
                 })()}
-                {order.unreadCount > 0 && (
-                  <button onClick={() => setOpenChatOrder(order.advOrderNo)}
-                    className="mx-3 sm:mx-3.5 mb-2.5 flex items-center gap-1.5 text-xs text-sell hover:bg-sell/10 bg-sell/5 border border-sell/20 px-2.5 py-1.5 rounded-lg transition-colors">
-                    <MessageSquare size={12} /> {order.unreadCount} pesan belum dibaca — buka chat
-                  </button>
-                )}
               </div>
             );
           })

@@ -46,7 +46,7 @@ app.use('/api/autoreply', autoreplyRoutes);
 // Single source of truth for "what is actually running". Shown in Settings and
 // printed at boot, so a stale build can be spotted in seconds instead of by
 // grepping source files on the server.
-const APP_VERSION = 'v45';
+const APP_VERSION = 'v47';
 app.get('/health', (req, res) => res.json({ status: 'ok', version: APP_VERSION, timestamp: Date.now() }));
 
 // Optionally serve the built frontend (frontend/dist) from this same process,
@@ -70,4 +70,7 @@ app.listen(PORT, HOST, () => {
   // 24/7 read-only capture (FTD snapshots + buyer log) — runs server-side so
   // event data stays complete even with every browser closed. CAPTURE_WORKER=0 to disable.
   require('./utils/captureWorker').start();
+  // Auto-reply now runs here instead of in the browser: one sender, always on,
+  // unaffected by a phone tab going to sleep. AUTO_REPLY_WORKER=0 to disable.
+  require('./utils/autoReplyWorker').start();
 });

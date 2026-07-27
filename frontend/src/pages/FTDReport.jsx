@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { merchantApi, ordersApi } from '../api';
 import Layout from '../components/Layout';
+import { downloadCsv, stamp } from '../csv';
 import { formatAmount, normalizeState } from '../components/helpers';
-import { UserPlus, RefreshCw, CalendarRange, AlertTriangle } from 'lucide-react';
+import { UserPlus, RefreshCw, CalendarRange, AlertTriangle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const DAY = 86400000;
@@ -115,6 +116,14 @@ export default function FTDReport() {
 
   const card = 'bg-surface-800 border border-surface-700 rounded-lg p-4';
 
+  function exportCsv() {
+    downloadCsv(`ftd-${stamp()}.csv`,
+      ['No', 'Nickname', 'Prior P2P', 'Terdaftar', 'Jumlah order', 'Total USDT', 'Total fiat', 'Status'],
+      view.rows.map((b, i) => [i + 1, b.nickName || '', b.priorP2P === null ? '' : b.priorP2P,
+        b.registryTime ? new Date(b.registryTime).toISOString().slice(0, 10) : '',
+        b.orders, b.usdt, b.fiat, b.isFtd ? 'FTD' : (b.captured ? 'Returning' : 'not captured')]));
+  }
+
   return (
     <Layout>
       <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
@@ -161,6 +170,10 @@ export default function FTDReport() {
                 <input type="number" min="0" step="any" value={minBuy} onChange={e => setMinBuy(e.target.value)} placeholder="0"
                   className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-sm text-surface-50 font-mono focus:outline-none focus:border-brand-500 w-[130px]" />
               </div>
+                <button onClick={exportCsv} disabled={view.rows.length === 0}
+                  className="flex items-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-40">
+                  <Download size={13} /> CSV
+                </button>
               <button onClick={calculate} disabled={loading}
                 className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium rounded-md px-5 py-2 flex items-center gap-2 transition-colors">
                 {loading ? <RefreshCw size={15} className="animate-spin" /> : <UserPlus size={15} />}{loading ? 'Calculating…' : 'Calculate'}

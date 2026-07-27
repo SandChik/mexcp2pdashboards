@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { merchantApi, registryApi } from '../api';
 import Layout from '../components/Layout';
+import { downloadCsv, stamp } from '../csv';
 import { formatAmount } from '../components/helpers';
-import { BookUser, RefreshCw, Search, Trash2, AlertTriangle, Copy } from 'lucide-react';
+import { BookUser, RefreshCw, Search, Trash2, AlertTriangle, Copy, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { askConfirm } from '../components/confirm';
 
@@ -60,6 +61,14 @@ export default function BuyerLog() {
   const card = 'bg-surface-800 border border-surface-700 rounded-lg';
   const inp = 'bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-sm text-surface-50 focus:outline-none focus:border-brand-500';
 
+  function exportCsv() {
+    downloadCsv(`catatan-buyer-${stamp()}.csv`,
+      ['Nama KYC', 'Nickname', 'Merchant', 'Selesai', 'Nominal', 'Mata uang', 'USDT', 'No. order', 'Duplikat'],
+      rows.map(r => [r.realName || '', r.nickName || '', merchantName(r.merchantId),
+        r.doneAt ? new Date(r.doneAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        r.amount, r.fiatUnit || '', r.usdt, r.advOrderNo, r._dup ? `ya (${r._dupCount}x)` : 'tidak']));
+  }
+
   return (
     <Layout>
       <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
@@ -91,6 +100,10 @@ export default function BuyerLog() {
                 className={`flex items-center gap-1.5 text-xs rounded-md px-3 py-2.5 border transition-colors ${dupOnly ? 'bg-sell/15 text-sell border-sell/40' : 'bg-surface-900 text-surface-300 border-surface-700 hover:text-surface-50'}`}>
                 <AlertTriangle size={13} /> Hanya duplikat
               </button>
+                <button onClick={exportCsv} disabled={rows.length === 0}
+                  className="flex items-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-40">
+                  <Download size={13} /> CSV
+                </button>
               <button onClick={load} disabled={loading}
                 className="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium rounded-md px-4 py-2 transition-colors">
                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh

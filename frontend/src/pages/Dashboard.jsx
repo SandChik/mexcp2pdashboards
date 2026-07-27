@@ -6,6 +6,28 @@ import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X, Bell } from 'lucide
 import { subscribeQueue, getActiveByMerchant } from '../actionQueue';
 import { useNavigate } from 'react-router-dom';
 
+/**
+ * Breakpoint decided in JS, not CSS.
+ *
+ * The previous version rendered a mobile block with `lg:hidden` AND a desktop
+ * block with `hidden lg:grid`. Tailwind only hides them visually — React mounts
+ * BOTH, so every MerchantPanel existed twice at once: two 5-second pollers, two
+ * state-change detectors (hence duplicate toasts and sounds) and, before the
+ * worker took over, two auto-reply senders inside a single tab.
+ */
+function useIsDesktop() {
+  const q = '(min-width: 1024px)';
+  const [is, setIs] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(q);
+    const onChange = e => setIs(e.matches);
+    setIs(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return is;
+}
+
 const DAY = 86400000;
 const MAX_DAYS = 8;
 const startOfDay = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -30,6 +52,7 @@ export default function Dashboard() {
   const [dateInput, setDateInput] = useState(() => ({ from: toDateStr(todayStart()), to: toDateStr(Date.now()) }));
   const [activeMerchant, setActiveMerchant] = useState(0); // mobile: which panel is shown
   const [alert, setAlert] = useState(null);   // { index, name, delta } — activity on a panel you can't see
+  const isDesktop = useIsDesktop();
   const navigate = useNavigate();
   const dateRef = useRef(null);
   const prevActive = useRef(null);
@@ -262,22 +285,26 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            {/* Mobile: single panel */}
-            <div className="lg:hidden flex-1 min-h-0 p-2.5">
-              {merchants.slice(0, 3).map((m, i) => (
-                <div key={m.id} className={i === activeMerchant ? 'h-full' : 'hidden'}>
-                  <MerchantPanel merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
-                </div>
-              ))}
-            </div>
-            {/* Desktop: side-by-side grid */}
-            <div className="hidden lg:grid flex-1 gap-3 p-3 overflow-hidden min-h-0"
-              style={{ gridTemplateColumns: `repeat(${Math.min(merchants.length, 3)}, minmax(0, 1fr))` }}>
-              {merchants.slice(0, 3).map(m => (
-                <MerchantPanel key={m.id} merchant={m} dateRange={dateRange}
-                  refreshKey={refreshKey} autoRefresh={autoRefresh} />
-              ))}
-            </div>
+            {/* Exactly ONE set of panels is ever mounted — see useIsDesktop above. */}
+            {isDesktop ? (
+              <div className="grid flex-1 gap-3 p-3 overflow-hidden min-h-0"
+                style={{ gridTemplateColumns: `repeat(${Math.min(merchants.length, 3)}, minmax(0, 1fr))` }}>
+                {merchants.slice(0, 3).map(m => (
+                  <MerchantPanel key={m.id} merchant={m} dateRange={dateRange}
+                    refreshKey={refreshKey} autoRefresh={autoRefresh} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 p-2.5">
+                {/* Hidden merchants stay mounted on purpose: that is what keeps
+                    their sounds and new-order banner working. Just once each. */}
+                {merchants.slice(0, 3).map((m, i) => (
+                  <div key={m.id} className={i === activeMerchant ? 'h-full' : 'hidden'}>
+                    <MerchantPanel merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>

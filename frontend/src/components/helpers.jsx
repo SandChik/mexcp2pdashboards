@@ -31,11 +31,15 @@ export function getAdPaymentLabel(ad) {
 
 // ─── Order States ─────────────────────────────────────────────────────────────
 export const ORDER_STATES = {
-  // Only three colours, on purpose: more than that and the list stops being
-  // scannable. Blue = still running, green = finished, red = failed.
-  0: { label: 'Belum bayar', color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
+  // Border stays three colours so the list is scannable at a glance:
+  // blue = running, green = done, red = failed.
+  // The LABEL is finer-grained inside "running", because "waiting on them" and
+  // "money is in, act now" are very different situations for the operator:
+  //   amber label  = ball is in the other party's court (nothing to do yet)
+  //   blue label   = payment step cleared, it's moving / your turn
+  0: { label: 'Belum bayar', color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-brand-400' },
   1: { label: 'Sudah bayar', color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
-  2: { label: 'Menunggu',    color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
+  2: { label: 'Menunggu',    color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-brand-400' },
   3: { label: 'Diproses',    color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
   4: { label: 'Selesai',     color: 'text-buy bg-buy/10',             group: 'done',      accent: 'border-l-buy' },
   5: { label: 'Dibatalkan',  color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
