@@ -117,6 +117,7 @@ export default function FTDReport() {
   const card = 'bg-surface-800 border border-surface-700 rounded-lg p-4';
 
   function exportCsv() {
+    if (!view) return;
     downloadCsv(`ftd-${stamp()}.csv`,
       ['No', 'Nickname', 'Prior P2P', 'Terdaftar', 'Jumlah order', 'Total USDT', 'Total fiat', 'Status'],
       view.rows.map((b, i) => [i + 1, b.nickName || '', b.priorP2P === null ? '' : b.priorP2P,
@@ -170,7 +171,7 @@ export default function FTDReport() {
                 <input type="number" min="0" step="any" value={minBuy} onChange={e => setMinBuy(e.target.value)} placeholder="0"
                   className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-sm text-surface-50 font-mono focus:outline-none focus:border-brand-500 w-[130px]" />
               </div>
-                <button onClick={exportCsv} disabled={view.rows.length === 0}
+                <button onClick={exportCsv} disabled={!view || view.rows.length === 0}
                   className="flex items-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-40">
                   <Download size={13} /> CSV
                 </button>

@@ -36,6 +36,9 @@ jobs:
           npm ci
           npm run lint
           npm run build
+          # Renders every route in a headless DOM. Catches crashes that lint
+          # cannot see — a null dereference in JSX, for instance.
+          npm run smoke
 
       - name: Load SSH key
         run: |

@@ -8,7 +8,7 @@ echo "==> deps (backend, prod only)"
 cd "$APP/backend" && npm ci --omit=dev
 
 echo "==> lint + build frontend"
-cd "$APP/frontend" && npm ci && npm run lint && npm run build
+cd "$APP/frontend" && npm ci && npm run lint && npm run build && npm run smoke
 
 echo "==> restart service"
 sudo /usr/bin/systemctl restart mexc-dashboard
