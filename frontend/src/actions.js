@@ -1,6 +1,6 @@
 import { ordersApi } from './api';
 import { askConfirm } from './components/confirm';
-import { formatAmount, normalizeState, ORDER_STATES } from './components/helpers';
+import { formatAmount, normalizeState, ORDER_STATES, getBankName } from './components/helpers';
 import toast from 'react-hot-toast';
 
 /**
@@ -82,7 +82,9 @@ export async function releaseOrder(merchantId, order, { skipConfirm = false } = 
       realName ? `Nama KYC : ${realName}` : null,
       `Nickname : ${nick}`,
       `Dia bayar: ${amt}`,
-      pay?.account ? `Ke rek.  : ${pay.account}` : null,
+      pay ? `Bank     : ${getBankName(pay.payMethod)}` : null,
+      pay?.account ? `No. rek. : ${pay.account}` : null,
+      pay?.payee ? `A/N      : ${pay.payee}` : null,
       '',
       'Pastikan dana SUDAH benar-benar masuk ke rekening Anda dan nama pengirim cocok. Aksi ini tidak bisa dibatalkan.',
     ].filter(l => l !== null);

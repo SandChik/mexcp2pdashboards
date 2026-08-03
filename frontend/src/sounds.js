@@ -21,14 +21,19 @@ const DEFAULTS = {
   volume: 0.5,          // 0..1 master, scaled down internally (never harsh)
   events: {             // per-event toggles
     newOrder: true,
+    unpaid: true,
     paid: true,
+    waiting: true,
+    processing: true,
     done: true,
     cancelled: true,
+    invalid: true,
+    refused: true,
+    timeout: true,
     message: true,
     duplicate: true,
     error: true,
-  },
-};
+  },};
 
 function loadPrefs() {
   try {
@@ -110,23 +115,34 @@ function note(freq, { at = 0, dur = 0.22, gain = 1 } = {}) {
   o2.start(t0); o2.stop(t0 + dur * 0.4);
 }
 
-const N = { E4: 329.63, G4: 392.0, A4: 440.0, D5: 587.33, F5: 698.46, A5: 880.0, C6: 1046.5, E6: 1318.5, G6: 1568.0 };
+const N = { C4: 261.63, E4: 329.63, G4: 392.0, A4: 440.0, C5: 523.25, D5: 587.33, E5: 659.25,
+            F5: 698.46, G5: 783.99, A5: 880.0, B5: 987.77, C6: 1046.5, D6: 1174.66, E6: 1318.5, G6: 1568.0 };
 
 /**
- * Motifs — all in the same short two-tone family so the app sounds coherent,
- * but each with its own interval and register so you can tell them apart:
- *   rising  = needs you
- *   falling = finished
- *   flat    = attention
+ * One motif per order state, so you can tell what happened by ear alone.
+ * They share the same short, glassy voice but differ in shape and register:
+ *   rising      = something needs you
+ *   flat/repeat = holding pattern
+ *   falling     = closed, one way or another
+ * The lower and slower it falls, the worse the outcome.
  */
 const MOTIFS = {
-  newOrder:  () => { note(N.A5, { dur: 0.14 }); note(N.E6, { at: 0.075, dur: 0.26 }); },
-  paid:      () => { note(N.C6, { dur: 0.14 }); note(N.G6, { at: 0.075, dur: 0.26, gain: 1.05 }); },
-  done:      () => { note(N.E6, { dur: 0.14 }); note(N.A5, { at: 0.08, dur: 0.30 }); },
-  cancelled: () => { note(N.D5, { dur: 0.16, gain: 0.85 }); note(N.A4, { at: 0.09, dur: 0.30, gain: 0.85 }); },
-  message:   () => { note(N.E6, { dur: 0.18, gain: 0.75 }); },
-  duplicate: () => { note(N.F5, { dur: 0.12 }); note(N.F5, { at: 0.14, dur: 0.26 }); },
-  error:     () => { note(N.G4, { dur: 0.16, gain: 0.8 }); note(N.E4, { at: 0.1, dur: 0.28, gain: 0.7 }); },
+  // ── Order states ──
+  unpaid:     () => { note(N.D5, { dur: 0.20, gain: 0.85 }); },                                       // menunggu buyer bayar
+  paid:       () => { note(N.C6, { dur: 0.14 }); note(N.G6, { at: 0.075, dur: 0.26, gain: 1.05 }); }, // uang masuk — giliran Anda
+  waiting:    () => { note(N.A5, { dur: 0.13, gain: 0.8 }); note(N.A5, { at: 0.15, dur: 0.22, gain: 0.8 }); }, // dua ketuk datar
+  processing: () => { note(N.G5, { dur: 0.13 }); note(N.B5, { at: 0.08, dur: 0.24 }); },              // naik kecil, sedang jalan
+  done:       () => { note(N.E6, { dur: 0.13 }); note(N.C6, { at: 0.08, dur: 0.16 }); note(N.G5, { at: 0.17, dur: 0.34 }); }, // turun menutup
+  cancelled:  () => { note(N.D5, { dur: 0.16, gain: 0.85 }); note(N.A4, { at: 0.09, dur: 0.30, gain: 0.85 }); },
+  invalid:    () => { note(N.F5, { dur: 0.14, gain: 0.85 }); note(N.E5, { at: 0.10, dur: 0.30, gain: 0.8 }); },  // turun rapat
+  refused:    () => { note(N.C5, { dur: 0.15, gain: 0.9 }); note(N.G4, { at: 0.10, dur: 0.32, gain: 0.85 }); },
+  timeout:    () => { note(N.G4, { dur: 0.12, gain: 0.8 }); note(N.E4, { at: 0.10, dur: 0.14, gain: 0.8 }); note(N.C4, { at: 0.21, dur: 0.34, gain: 0.8 }); }, // tiga turun, paling rendah
+
+  // ── Bukan status order ──
+  newOrder:   () => { note(N.A5, { dur: 0.14 }); note(N.E6, { at: 0.075, dur: 0.26 }); },
+  message:    () => { note(N.E6, { dur: 0.18, gain: 0.75 }); },
+  duplicate:  () => { note(N.F5, { dur: 0.12 }); note(N.F5, { at: 0.14, dur: 0.26 }); },
+  error:      () => { note(N.G4, { dur: 0.16, gain: 0.8 }); note(N.E4, { at: 0.1, dur: 0.28, gain: 0.7 }); },
 };
 
 /** Play an event sound, respecting mute + per-event toggles. */
@@ -144,19 +160,26 @@ export function previewSound(event) {
 }
 
 export const SOUND_EVENTS = [
-  { key: 'newOrder',  label: 'Order baru masuk',       hint: 'Nada naik — ada order baru' },
-  { key: 'paid',      label: 'Buyer sudah bayar',      hint: 'Nada naik terang — perlu Anda release' },
-  { key: 'done',      label: 'Order selesai',          hint: 'Nada turun menutup — transaksi tuntas' },
-  { key: 'cancelled', label: 'Batal / timeout / tolak', hint: 'Nada rendah turun — order gugur' },
-  { key: 'message',   label: 'Pesan chat baru',        hint: 'Satu bel lembut' },
-  { key: 'duplicate', label: 'Nama KYC duplikat',      hint: 'Dua denyut — kemungkinan 1 KTP banyak akun' },
-  { key: 'error',     label: 'Gagal sync ke MEXC',     hint: 'Dua nada rendah' },
+  { key: 'newOrder',   label: 'Order baru masuk',   hint: 'Nada naik' },
+  { key: 'unpaid',     label: 'Belum bayar',        hint: 'Satu nada — menunggu buyer' },
+  { key: 'paid',       label: 'Sudah bayar',        hint: 'Naik terang — giliran Anda release' },
+  { key: 'waiting',    label: 'Menunggu diproses',  hint: 'Dua ketuk datar' },
+  { key: 'processing', label: 'Sedang diproses',    hint: 'Naik kecil' },
+  { key: 'done',       label: 'Selesai',            hint: 'Tiga nada turun menutup' },
+  { key: 'cancelled',  label: 'Dibatalkan',         hint: 'Turun sedang' },
+  { key: 'invalid',    label: 'Invalid',            hint: 'Turun rapat' },
+  { key: 'refused',    label: 'Ditolak',            hint: 'Turun ke nada rendah' },
+  { key: 'timeout',    label: 'Timeout',            hint: 'Tiga turun, paling rendah' },
+  { key: 'message',    label: 'Pesan chat baru',    hint: 'Satu bel lembut' },
+  { key: 'duplicate',  label: 'Nama KYC duplikat',  hint: 'Dua denyut' },
+  { key: 'error',      label: 'Gagal sync ke MEXC', hint: 'Dua nada rendah' },
 ];
 
-/** Map an order state transition to the right sound event. */
+/** Map an order state to its own sound. Every state has one now. */
+const STATE_SOUND = {
+  0: 'unpaid', 1: 'paid', 2: 'waiting', 3: 'processing',
+  4: 'done', 5: 'cancelled', 6: 'invalid', 7: 'refused', 8: 'timeout',
+};
 export function soundForState(state) {
-  if (state === 1) return 'paid';
-  if (state === 4) return 'done';
-  if ([5, 6, 7, 8].includes(state)) return 'cancelled';
-  return null; // 0/2/3 — intermediate, stay quiet to avoid noise
+  return STATE_SOUND[state] || null;
 }

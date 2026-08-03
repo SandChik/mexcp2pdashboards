@@ -46,7 +46,7 @@ app.use('/api/autoreply', autoreplyRoutes);
 // Single source of truth for "what is actually running". Shown in Settings and
 // printed at boot, so a stale build can be spotted in seconds instead of by
 // grepping source files on the server.
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v52';
 app.get('/health', (req, res) => res.json({ status: 'ok', version: APP_VERSION, timestamp: Date.now() }));
 
 // Optionally serve the built frontend (frontend/dist) from this same process,

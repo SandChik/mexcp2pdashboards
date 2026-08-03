@@ -163,7 +163,9 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
       realName ? `Nama KYC : ${realName}` : null,
       `Nickname : ${nick}`,
       `Dia bayar: ${amt}`,
-      pay?.account ? `Ke rek.  : ${pay.account}` : null,
+      pay ? `Bank     : ${getBankName(pay.payMethod)}` : null,
+      pay?.account ? `No. rek. : ${pay.account}` : null,
+      pay?.payee ? `A/N      : ${pay.payee}` : null,
       '',
       'Pastikan dana SUDAH benar-benar masuk ke rekening Anda dan nama pengirim cocok. Aksi ini tidak bisa dibatalkan.',
     ].filter(l => l !== null);

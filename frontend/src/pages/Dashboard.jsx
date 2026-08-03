@@ -55,6 +55,7 @@ export default function Dashboard() {
   const isDesktop = useIsDesktop();
   const navigate = useNavigate();
   const dateRef = useRef(null);
+  const sheetRef = useRef(null); // mobile bottom sheet lives outside dateRef
   const prevActive = useRef(null);
   const activeMerchantRef = useRef(0);
   useEffect(() => { activeMerchantRef.current = activeMerchant; }, [activeMerchant]);
@@ -94,7 +95,14 @@ export default function Dashboard() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    const h = (e) => { if (dateRef.current && !dateRef.current.contains(e.target)) setShowDate(false); };
+    const h = (e) => {
+      // The mobile sheet is a sibling of the trigger button, so checking only
+      // dateRef closed it on the very first tap inside it — the filter was
+      // unusable on phones. Both containers count as "inside".
+      if (dateRef.current?.contains(e.target)) return;
+      if (sheetRef.current?.contains(e.target)) return;
+      setShowDate(false);
+    };
     const esc = (e) => { if (e.key === 'Escape') setShowDate(false); }; // heuristic #3: always an exit
     document.addEventListener('mousedown', h);
     document.addEventListener('keydown', esc);
@@ -263,7 +271,7 @@ export default function Dashboard() {
         {showDate && (
           <div className="sm:hidden fixed inset-0 z-50 flex items-end animate-fade-in" onClick={() => setShowDate(false)}>
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-            <div className="relative w-full p-3 pb-safe animate-sheet-up" onClick={e => e.stopPropagation()}>
+            <div ref={sheetRef} className="relative w-full p-3 pb-safe animate-sheet-up" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-2 px-1">
                 <span className="text-sm font-medium text-surface-50">Pilih rentang</span>
                 <button onClick={() => setShowDate(false)} className="text-surface-300 hover:text-surface-50 p-1"><X size={18} /></button>
