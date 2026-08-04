@@ -68,11 +68,14 @@ export default function ActionQueue() {
   useEffect(() => {
     let stop = false;
     const load = async () => {
-      const entries = await Promise.all((meta.merchants || []).map(async m => {
-        try { const r = await registryApi.list(m.id); return [m.id, r.data?.nameIndex || {}]; }
-        catch { return [m.id, {}]; }
-      }));
-      if (!stop) setNameIdx(Object.fromEntries(entries));
+      // One request, across all merchants — a repeat buyer who switches
+      // merchant must still raise the alert.
+      const first = (meta.merchants || [])[0];
+      if (!first) return;
+      try {
+        const r = await registryApi.list(first.id, true);
+        if (!stop) setNameIdx(r.data?.nameIndex || {});
+      } catch { /* keep last */ }
     };
     if (meta.merchants?.length) {
       load();
@@ -188,7 +191,7 @@ export default function ActionQueue() {
             const realName = d?.userInfo?.realName || null;
             const pay = d?.confirmPaymentInfo || d?.paymentInfo?.[0] || null;
             const priorCount = realName
-              ? (nameIdx[o.merchantId]?.[normName(realName)] || []).filter(n => n !== o.advOrderNo).length
+              ? (nameIdx[normName(realName)] || []).filter(n => n !== o.advOrderNo).length
               : 0;
 
             return (
