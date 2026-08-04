@@ -91,7 +91,17 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     try { const r = await registryApi.list(merchant.id); setLogNameIndex(r.data?.nameIndex || {}); }
     catch { /* keep last */ }
   }, [merchant.id]);
-  useEffect(() => { if (buyerLog) loadNameIndex(); }, [buyerLog, loadNameIndex]);
+  useEffect(() => {
+    if (!buyerLog) return;
+    loadNameIndex();
+    // The buyer log is written by the SERVER worker now, so this browser never
+    // hears about new entries on its own. Without this refresh the duplicate
+    // alert only knows the names that existed when the page was opened — a
+    // buyer whose first order completed after that would slip through, even
+    // though the Catatan Buyer page (which always fetches fresh) shows them.
+    const t = setInterval(loadNameIndex, 45000);
+    return () => clearInterval(t);
+  }, [buyerLog, loadNameIndex]);
 
   // Resolve KYC names (cached server-side) for every order — shown on each row.
   useEffect(() => {
@@ -220,7 +230,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       usdt: parseFloat(o.tradableQuantity) || 0,
       fiatUnit: o.fiatUnit || '',
       doneAt: o.updateTime || o.createTime || Date.now(),
-    }))).then(r => { if (r.data?.added) loadNameIndex(); })
+    }))).then(() => loadNameIndex())   // a completed order may have just added a name
       .catch(() => { done.forEach(o => loggedRef.current.delete(o.advOrderNo)); });
   }, [orders, buyerLog, merchant.id, loadNameIndex]); // eslint-disable-line
 
