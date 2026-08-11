@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { authMiddleware } = require('../middleware/authMiddleware');
-const { captureBuyerLog } = require('../utils/captureCore');
+const { captureBuyerLog, addBuyerLogEntries, deleteBuyerLogBatch, MANUAL_MERCHANT_ID } = require('../utils/captureCore');
 const { getMerchant } = require('../utils/store');
 const { audit } = require('../utils/audit');
 
@@ -30,6 +30,31 @@ router.post('/:mid/capture', authMiddleware, async (req, res) => {
   const { added, fetched } = await captureBuyerLog(merchant, orders);
   if (added) audit({ action: 'buyer_log_capture', merchantId: merchant.id, merchantName: merchant.name, added });
   res.json({ added, fetched });
+});
+
+// POST /api/registry/manual — add entries typed by hand or imported from CSV.
+// Body: { records: [{ realName, nickName?, doneAt?, amount?, usdt?, fiatUnit?,
+//                     note?, advOrderNo?, force?, row? }], source? }
+// Declared BEFORE the '/:mid' routes so 'manual' is never read as a merchant id.
+// The duplicate-name gate lives in captureCore (server-side), so a stale tab
+// can't slip past the confirmation the UI showed.
+router.post('/manual', authMiddleware, async (req, res) => {
+  const records = Array.isArray(req.body.records) ? req.body.records : [];
+  if (records.length === 0) return res.status(400).json({ error: 'Tidak ada baris untuk ditambahkan' });
+  if (records.length > 2000) return res.status(400).json({ error: 'Maksimal 2000 baris per impor' });
+  const source = req.body.source === 'import' ? 'import' : 'manual';
+  const { added, batchId, skipped } = await addBuyerLogEntries(records, source);
+  if (added) audit({ action: 'buyer_log_manual_add', merchantId: MANUAL_MERCHANT_ID, source, added, batchId });
+  res.json({ added, batchId, skipped });
+});
+
+// DELETE /api/registry/manual/batch/:batchId — undo one import in one shot.
+// Three segments, so it never collides with '/:mid/:advOrderNo'.
+router.delete('/manual/batch/:batchId', authMiddleware, async (req, res) => {
+  const { removed } = await deleteBuyerLogBatch(req.params.batchId);
+  if (!removed) return res.status(404).json({ error: 'Batch tidak ditemukan' });
+  audit({ action: 'buyer_log_batch_delete', batchId: req.params.batchId, removed });
+  res.json({ success: true, removed });
 });
 
 // GET /api/registry/:mid — records for one merchant (or ?all=true for every

@@ -124,6 +124,92 @@ function captureBuyerLog(merchant, orders, MAX_FETCH = 30) {
   });
 }
 
+// ── Manual & imported entries ───────────────────────────────────────
+// Entries that did NOT come from a MEXC order (typed by hand or imported from
+// a CSV). They live in the SAME buyer-log file so they feed the duplicate-name
+// index exactly like captured orders do — that index is the whole point of the
+// feature. They are marked with `source` + `batchId` so a bad import can be
+// undone in one go instead of row by row.
+const MANUAL_MERCHANT_ID = 'manual';
+
+const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const rand4 = () => Math.random().toString(36).slice(2, 6);
+
+function newEntryId() { return `M-${Date.now().toString(36)}-${rand4()}`; }
+function newBatchId() { return `B-${Date.now().toString(36)}-${rand4()}`; }
+
+/**
+ * Append manual/imported buyer records.
+ * entries: [{ realName, nickName?, doneAt?, amount?, usdt?, fiatUnit?, note?,
+ *             advOrderNo?, force? }]
+ * `force: true` means the caller already confirmed the duplicate-name warning.
+ * Returns { added, batchId, skipped: [{ row, name, reason }] }.
+ * Reasons: no_name | id_exists | duplicate_name
+ */
+function addBuyerLogEntries(entries, source = 'manual') {
+  return withLock(async () => {
+    const log = readJson(LOG_PATH);
+    const batchId = newBatchId();
+
+    // Name index of what's already stored, so duplicates are caught against
+    // history AND against earlier rows of this same import.
+    const seenNames = new Set();
+    for (const r of Object.values(log)) if (r && r.realName) seenNames.add(normName(r.realName));
+
+    const skipped = [];
+    let added = 0;
+
+    (Array.isArray(entries) ? entries : []).forEach((e, i) => {
+      const row = e && e.row != null ? e.row : i + 1;
+      const realName = String((e && e.realName) || '').trim();
+      if (!realName) { skipped.push({ row, name: '', reason: 'no_name' }); return; }
+
+      const id = String((e && e.advOrderNo) || '').trim() || newEntryId();
+      if (log[id]) { skipped.push({ row, name: realName, reason: 'id_exists' }); return; }
+
+      const key = normName(realName);
+      if (seenNames.has(key) && !(e && e.force)) {
+        skipped.push({ row, name: realName, reason: 'duplicate_name' });
+        return;
+      }
+
+      const doneAt = Number(e.doneAt) > 0 ? Number(e.doneAt) : Date.now();
+      log[id] = {
+        merchantId: MANUAL_MERCHANT_ID,
+        realName,
+        nickName: (e.nickName && String(e.nickName).trim()) || null,
+        memberId: null,
+        doneAt,
+        amount: Number(e.amount) || 0,
+        usdt: Number(e.usdt) || 0,
+        fiatUnit: (e.fiatUnit && String(e.fiatUnit).trim().toUpperCase()) || 'IDR',
+        note: (e.note && String(e.note).trim()) || null,
+        source,                    // 'manual' | 'import'
+        batchId,
+        addedAt: Date.now(),
+      };
+      seenNames.add(key);
+      added++;
+    });
+
+    if (added) writeJson(LOG_PATH, log);
+    return { added, batchId, skipped };
+  });
+}
+
+/** Undo one import/manual batch. Only touches records that carry this batchId. */
+function deleteBuyerLogBatch(batchId) {
+  return withLock(async () => {
+    const log = readJson(LOG_PATH);
+    let removed = 0;
+    for (const [id, r] of Object.entries(log)) {
+      if (r && r.batchId === batchId) { delete log[id]; removed++; }
+    }
+    if (removed) writeJson(LOG_PATH, log);
+    return { removed };
+  });
+}
+
 /** Recent orders (last `hours`) for one merchant — small page cap: the worker
  *  only needs what's live right now, not history. */
 async function fetchRecentOrders(merchant, hours = 24, maxPages = 3) {
@@ -142,4 +228,8 @@ async function fetchRecentOrders(merchant, hours = 24, maxPages = 3) {
   return all.map(o => ({ ...o, _state: normState(o.state) }));
 }
 
-module.exports = { captureFtdByOrderNos, captureBuyerLog, fetchRecentOrders, normState, ACTIVE, FTD_PATH, LOG_PATH };
+module.exports = {
+  captureFtdByOrderNos, captureBuyerLog, fetchRecentOrders, normState, ACTIVE,
+  addBuyerLogEntries, deleteBuyerLogBatch, MANUAL_MERCHANT_ID,
+  FTD_PATH, LOG_PATH,
+};

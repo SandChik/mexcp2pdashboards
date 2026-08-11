@@ -55,6 +55,8 @@ export const ordersApi = {
 export const registryApi = {
   list: (mid, all = false) => api.get(`/registry/${mid}`, { params: all ? { all: 'true' } : {} }),
   capture: (mid, orders) => api.post(`/registry/${mid}/capture`, { orders }),
+  addManual: (records, source = 'manual') => api.post('/registry/manual', { records, source }),
+  removeBatch: (batchId) => api.delete(`/registry/manual/batch/${batchId}`),
   remove: (mid, advOrderNo) => api.delete(`/registry/${mid}/${advOrderNo}`)
 };
 
