@@ -230,9 +230,9 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
 
   return (
     <div className="fixed inset-0 z-[9998] flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto"
-      onClick={onClose}>
+      onMouseDown={onClose}>
       <div className="w-full max-w-3xl bg-surface-800 border border-surface-700 rounded-2xl shadow-lift my-4"
-        onClick={e => e.stopPropagation()}>
+        onMouseDown={e => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-4 sm:px-5 h-14 border-b border-surface-700">
           <h3 className="font-semibold text-surface-50 text-[15px]">Tambah catatan buyer</h3>
           <span className="text-xs text-surface-300 hidden sm:inline">manual atau impor CSV — masuk ke merchant “Manual”</span>

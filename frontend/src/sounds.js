@@ -1,31 +1,42 @@
 /**
- * Sound engine — ONE audio file for every event.
+ * Sound engine — one file per event, in public/sounds/<event>.mp3.
  *
- * Previously each event had its own synthesised motif, so you could tell what
- * happened by ear. That is gone by request: every event now plays the same
- * clip. The trade-off is real and worth knowing — a sound no longer tells you
- * WHICH event fired, only THAT something fired, so you have to look at the
- * screen. The per-event toggles below are what keeps that manageable: switch
- * off the noisy events and the ones left are the ones worth looking up for.
+ * Five source clips cover thirteen events, grouped by what you'd actually DO
+ * about them rather than by state name:
  *
- * The file lives in public/ (served at /notif.mp3) rather than being inlined,
- * so the browser caches it once instead of carrying it in every JS bundle.
+ *   paid                              money is waiting on you — release it
+ *   newOrder                          an order arrived
+ *   message                           the buyer said something
+ *   done                              closed well
+ *   cancelled/invalid/refused/timeout  closed badly — all share one sound
+ *   duplicate/error                   something needs checking
+ *   unpaid/waiting/processing         intermediate steps; noisy, ship muted
+ *
+ * All clips are trimmed and levelled to the same loudness, so no single event
+ * is startlingly louder than the rest.
+ *
+ * TO REPLACE ANY SOUND: drop your own mp3 at public/sounds/<event>.mp3 with the
+ * same filename. No code change. Anything that fails to load falls back to
+ * /notif.mp3, so a missing file degrades instead of going silent.
  */
 
 const KEY = 'mexc_sound_prefs';
-const SRC = '/notif.mp3';
-const POOL = 4;        // overlapping plays — a burst of orders shouldn't cut itself off
-const MAX_MS = 2500;   // hard stop, so a mis-encoded file can never drone on
+const FALLBACK_SRC = '/notif.mp3';
+const srcFor = (event) => `/sounds/${event}.mp3`;
+const MAX_MS = 4000;   // hard stop, so a mis-encoded replacement can't drone on
 
 const DEFAULTS = {
   enabled: true,
   volume: 0.5,          // 0..1
   events: {             // per-event toggles
     newOrder: true,
-    unpaid: true,
+    // Off by default: these fire on almost every order and carry no decision.
+    // Existing installs keep whatever is already in localStorage — switch them
+    // off in Settings if the dashboard has been noisy.
+    unpaid: false,
+    waiting: false,
+    processing: false,
     paid: true,
-    waiting: true,
-    processing: true,
     done: true,
     cancelled: true,
     invalid: true,
@@ -54,31 +65,35 @@ export function setSoundPrefs(patch) {
 }
 
 // -- Audio elements ---------------------------------------------------------
-// A small ring of preloaded elements. Creating a fresh Audio() per play leaks
-// elements over a long trading session; reusing four covers any realistic burst.
-let pool = null, cursor = 0, fileBroken = false;
+// One element per event, created on first use. Loading all thirteen up front
+// would spend bandwidth on sounds a given session may never play.
+const cache = new Map();
+let anyBroken = false;
 
-function ensurePool() {
-  if (pool || typeof Audio === 'undefined') return pool;
-  pool = [];
-  for (let i = 0; i < POOL; i++) {
-    const a = new Audio(SRC);
+function elFor(event) {
+  if (typeof Audio === 'undefined') return null;
+  let a = cache.get(event);
+  if (!a) {
+    a = new Audio(srcFor(event));
     a.preload = 'auto';
-    // A missing/unservable file must not fail silently — without this the app
-    // would just go quiet after a deploy that forgot to copy public/.
-    a.addEventListener('error', () => { fileBroken = true; }, { once: true });
-    pool.push(a);
+    // A missing per-event file must not mean silence — fall back to the base
+    // clip once, so a bad deploy is survivable rather than mute.
+    a.addEventListener('error', () => {
+      if (a.src.endsWith(FALLBACK_SRC)) { anyBroken = true; return; }
+      a.src = FALLBACK_SRC;
+      a.load();
+    });
+    cache.set(event, a);
   }
-  return pool;
+  return a;
 }
 
-// Browsers block audio until the page has been interacted with. Touch the
-// elements on the first gesture so the first real notification isn't the one
-// that gets swallowed.
+// Browsers block audio until the page has been interacted with. Warm the two
+// most common sounds on the first gesture so the first real notification isn't
+// the one that gets swallowed.
 if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
   const unlock = () => {
-    const p = ensurePool();
-    if (p && p[0]) p[0].load();
+    ['paid', 'newOrder'].forEach(e => { const a = elFor(e); if (a) a.load(); });
     window.removeEventListener('pointerdown', unlock);
     window.removeEventListener('keydown', unlock);
   };
@@ -109,16 +124,17 @@ function fallbackBeep() {
   } catch { /* audio unavailable */ }
 }
 
-function playClip() {
-  if (fileBroken) { fallbackBeep(); return; }
-  const p = ensurePool();
-  if (!p) return;
-  const a = p[cursor];
-  cursor = (cursor + 1) % p.length;
+function playClip(event) {
+  if (anyBroken) { fallbackBeep(); return; }
+  const base = elFor(event);
+  if (!base) return;
+  const vol = Math.min(1, Math.max(0, prefs.volume));
+  // Still playing? Use a throwaway copy so two orders landing together are both
+  // heard instead of the second cutting the first off mid-word.
+  const a = base.paused ? base : base.cloneNode();
   try {
-    a.pause();
     a.currentTime = 0;
-    a.volume = Math.min(1, Math.max(0, prefs.volume));
+    a.volume = vol;
     const done = a.play();
     if (done && done.catch) done.catch(() => { /* blocked until first gesture */ });
     setTimeout(() => { try { if (!a.paused) { a.pause(); a.currentTime = 0; } } catch { /* */ } }, MAX_MS);
@@ -129,26 +145,28 @@ function playClip() {
 export function playSound(event) {
   if (!prefs.enabled) return;
   if (prefs.events[event] === false) return;
-  playClip();
+  playClip(event);
 }
 
 /** Preview from the settings UI — ignores the per-event toggle, honours volume. */
-export function previewSound() { playClip(); }
+export function previewSound(event = 'newOrder') { playClip(event); }
 
+// `hint` describes what the sound is like, so the preview button in Settings
+// teaches the mapping instead of just making noise.
 export const SOUND_EVENTS = [
-  { key: 'newOrder',   label: 'Order baru masuk',   hint: 'Order baru muncul di salah satu merchant' },
-  { key: 'unpaid',     label: 'Belum bayar',        hint: 'Pembeli belum transfer' },
-  { key: 'paid',       label: 'Sudah bayar',        hint: 'Giliran Anda release' },
-  { key: 'waiting',    label: 'Menunggu diproses',  hint: 'Order masuk antrean merchant' },
-  { key: 'processing', label: 'Sedang diproses',    hint: 'Order sedang berjalan' },
-  { key: 'done',       label: 'Selesai',            hint: 'Order tuntas' },
-  { key: 'cancelled',  label: 'Dibatalkan',         hint: 'Order dibatalkan' },
-  { key: 'invalid',    label: 'Invalid',            hint: 'Order dianggap tidak sah' },
-  { key: 'refused',    label: 'Ditolak',            hint: 'Order ditolak' },
-  { key: 'timeout',    label: 'Timeout',            hint: 'Lewat batas waktu bayar' },
-  { key: 'message',    label: 'Pesan chat baru',    hint: 'Pembeli mengirim pesan' },
-  { key: 'duplicate',  label: 'Nama KYC duplikat',  hint: 'Nama ini sudah pernah order' },
-  { key: 'error',      label: 'Gagal sync ke MEXC', hint: 'Koneksi atau API key bermasalah' },
+  { key: 'paid',       label: 'Sudah bayar',        hint: 'Giliran Anda release — suara sukses' },
+  { key: 'newOrder',   label: 'Order baru masuk',   hint: 'Suara "order masuk"' },
+  { key: 'message',    label: 'Pesan chat baru',    hint: 'Suara "pesan masuk"' },
+  { key: 'done',       label: 'Selesai',            hint: 'Suara achievement — order tuntas' },
+  { key: 'cancelled',  label: 'Dibatalkan',         hint: 'Suara "order ditutup"' },
+  { key: 'timeout',    label: 'Timeout',            hint: 'Sama dengan Dibatalkan' },
+  { key: 'refused',    label: 'Ditolak',            hint: 'Sama dengan Dibatalkan' },
+  { key: 'invalid',    label: 'Invalid',            hint: 'Sama dengan Dibatalkan' },
+  { key: 'duplicate',  label: 'Nama KYC duplikat',  hint: 'Suara alert — perlu dicek' },
+  { key: 'error',      label: 'Gagal sync ke MEXC', hint: 'Suara alert — sama dengan duplikat' },
+  { key: 'unpaid',     label: 'Belum bayar',        hint: 'Default MATI — terlalu sering, tidak ada keputusan' },
+  { key: 'waiting',    label: 'Menunggu diproses',  hint: 'Default MATI' },
+  { key: 'processing', label: 'Sedang diproses',    hint: 'Default MATI' },
 ];
 
 /** Map an order state to its event key. */

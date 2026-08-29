@@ -25,6 +25,32 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [msgInput, setMsgInput] = useState('');
+
+  /**
+   * Click outside the card closes it.
+   *
+   * Bound to mouseDown on the backdrop only, and the card stops the event, so a
+   * drag that starts inside the card (selecting an account number) and ends on
+   * the backdrop does NOT count as an outside click.
+   *
+   * The one exception is an unsent chat message: closing would throw away what
+   * was typed, and a stray click is far more likely than a deliberate one. Ask
+   * instead of discarding.
+   */
+  const handleBackdrop = useCallback(async () => {
+    if (msgInput.trim()) {
+      const go = await askConfirm({
+        title: 'Tutup chat?',
+        message: 'Pesan yang sedang diketik belum terkirim dan akan hilang.',
+        confirmText: 'Tutup & buang',
+        cancelText: 'Lanjut ketik',
+        danger: true,
+      });
+      if (!go) return;
+    }
+    onClose();
+  }, [msgInput, onClose]);
+
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(initialTab);
   const [wsStatus, setWsStatus] = useState('disconnected');
@@ -231,8 +257,10 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
   const autoPayId = order?.confirmPaymentInfo?.id || order?.paymentInfo?.[0]?.id || null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4 animate-fade-in">
-      <div className="card !rounded-b-none sm:!rounded-xl w-full max-w-2xl h-[92dvh] sm:h-auto sm:max-h-[90vh] flex flex-col animate-sheet-up sm:animate-slide-up shadow-lift">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 sm:p-4 animate-fade-in"
+      onMouseDown={handleBackdrop}>
+      <div className="card !rounded-b-none sm:!rounded-xl w-full max-w-2xl h-[92dvh] sm:h-auto sm:max-h-[90vh] flex flex-col animate-sheet-up sm:animate-slide-up shadow-lift"
+        onMouseDown={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b-2 border-surface-700 bg-surface-900">
