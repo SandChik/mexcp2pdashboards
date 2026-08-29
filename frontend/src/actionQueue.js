@@ -3,7 +3,14 @@ import { normalizeState } from './components/helpers';
 import { actionFor } from './actions';
 
 /**
- * Cross-merchant queue of orders waiting for the operator.
+ * Cross-merchant list of orders that are still RUNNING (not finished).
+ *
+ * Two lists come out of one poll, on purpose:
+ *   items           — every unfinished order (states 0..3). What the page shows.
+ *   actionableCount — the subset the operator can act on right now. What the
+ *                     sidebar badge shows.
+ * Keeping them separate matters: a badge that counts orders you can't do
+ * anything about stops meaning "there is work for me" and gets ignored.
  *
  * One poller for the whole app (the sidebar badge and the queue page share
  * it), so adding the badge costs one request per merchant per cycle rather
@@ -14,9 +21,14 @@ import { actionFor } from './actions';
  */
 
 const POLL_MS = 15000;
-const WINDOW_MS = 86400000; // 24h — actionable orders are minutes old, never days
+const WINDOW_MS = 86400000; // 24h — running orders are minutes old, never days
+const RUNNING = [0, 1, 2, 3];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING
+                               // 4..8 (DONE/CANCEL/INVALID/REFUSE/TIMEOUT) are
+                               // finished and deliberately excluded — this is a
+                               // work list, not a history page.
 
 let items = [];
+let actionableCount = 0;
 let activeByMerchant = {};   // merchantId -> count of orders still running (state 0..3)
 let merchants = [];
 let listeners = [];
@@ -29,6 +41,9 @@ const emit = () => listeners.forEach(fn => { try { fn(); } catch { /* */ } });
 
 export function getQueue() { return items; }
 export function getQueueCount() { return items.length; }
+/** Orders the operator can act on RIGHT NOW — this is what the sidebar badge
+ *  counts, never the full running list. */
+export function getActionableCount() { return actionableCount; }
 /** Running-order count per merchant — lets the dashboard badge every merchant
  *  chip so you can see where the activity is without opening each panel. */
 export function getActiveByMerchant() { return activeByMerchant; }
@@ -53,10 +68,12 @@ export async function refreshQueue() {
         const raw = r.data;
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
         const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name }));
+        const running = norm.filter(o => RUNNING.includes(o._state));
         return {
           mid: m.id,
-          actionable: norm.filter(o => actionFor(o)),
-          active: norm.filter(o => [0, 1, 2, 3].includes(o._state)).length,
+          running,
+          actionable: running.filter(o => actionFor(o)).length,
+          active: running.length,
         };
       } catch { return null; } // one merchant failing must not blank the queue
     }));
@@ -68,8 +85,14 @@ export async function refreshQueue() {
     results.forEach(r => { if (r) nextActive[r.mid] = r.active; });
     activeByMerchant = nextActive;
 
-    items = results.filter(Boolean).flatMap(r => r.actionable).sort((a, b) => {
-      // Soonest deadline first; orders without a deadline sink to the bottom.
+    const ok = results.filter(Boolean);
+    actionableCount = ok.reduce((n, r) => n + r.actionable, 0);
+    items = ok.flatMap(r => r.running).sort((a, b) => {
+      // Orders needing action first — the whole point of the page is that the
+      // work sits at the top and the merely-running orders sit below it.
+      const aa = actionFor(a) ? 0 : 1, ab = actionFor(b) ? 0 : 1;
+      if (aa !== ab) return aa - ab;
+      // Then soonest deadline; orders without a deadline sink to the bottom.
       const da = a.payTimeLimit || Infinity, db = b.payTimeLimit || Infinity;
       if (da !== db) return da - db;
       return (b.createTime || 0) - (a.createTime || 0);
@@ -81,12 +104,31 @@ export async function refreshQueue() {
   }
 }
 
-/** Drop an order from the queue immediately after a successful action, so the
- *  row disappears without waiting for the next poll. */
+/**
+ * Reflect a successful action locally so the row updates instantly instead of
+ * waiting up to POLL_MS.
+ *
+ * The two actions end differently and must NOT be treated the same:
+ *   release — the order is finished, so it leaves the list.
+ *   confirm — we only marked OUR payment; the order is still running and now
+ *             waits for the counterpart to release. Removing it would make the
+ *             row vanish and then reappear at the next poll.
+ */
+export function applyActionLocally(advOrderNo, action) {
+  const before = items;
+  if (action === 'confirm') {
+    items = items.map(o => o.advOrderNo === advOrderNo ? { ...o, state: 1, _state: 1 } : o);
+  } else {
+    items = items.filter(o => o.advOrderNo !== advOrderNo);
+  }
+  actionableCount = items.filter(o => actionFor(o)).length;
+  if (items !== before) emit();
+}
+
+/** Kept for callers that just want the row gone (e.g. an order that turned out
+ *  to be finished already). */
 export function removeFromQueue(advOrderNo) {
-  const before = items.length;
-  items = items.filter(o => o.advOrderNo !== advOrderNo);
-  if (items.length !== before) emit();
+  applyActionLocally(advOrderNo, 'release');
 }
 
 /** Force a merchant-list refetch (e.g. after adding/removing a merchant). */

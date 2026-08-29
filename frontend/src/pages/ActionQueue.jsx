@@ -3,9 +3,9 @@ import Layout from '../components/Layout';
 import OrderDetailModal from '../components/OrderDetailModal';
 import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge } from '../components/helpers';
 import { runAction, actionFor } from '../actions';
-import { getQueue, subscribeQueue, refreshQueue, removeFromQueue, getQueueMeta } from '../actionQueue';
+import { getQueue, subscribeQueue, refreshQueue, applyActionLocally, getQueueMeta, getActionableCount } from '../actionQueue';
 import { ordersApi, registryApi } from '../api';
-import { Zap, RefreshCw, Keyboard, CheckCircle2, Coins, AlertTriangle, Clock, ExternalLink, Copy, User, Landmark } from 'lucide-react';
+import { Zap, RefreshCw, Keyboard, CheckCircle2, Coins, AlertTriangle, Clock, ExternalLink, Copy, User, Landmark, Hourglass } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 function fmtRemaining(ms) {
@@ -33,13 +33,21 @@ export default function ActionQueue() {
   useEffect(() => subscribeQueue(() => tick(t => t + 1)), []);
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
 
-  const items = getQueue();
+  const items = getQueue();          // every RUNNING order, action-first order
   const meta = getQueueMeta();
+  const nActionable = getActionableCount();
+  // Index of the first row that needs no action — used to draw one divider
+  // between "do this now" and "just running", without reordering anything.
+  const waitingFrom = items.findIndex(o => !actionFor(o));
 
   // Fetch each queued order's detail ONCE and keep it, so every row carries
   // what you need to decide — opening a modal per order defeats the point.
   useEffect(() => {
-    const missing = items.filter(o => !details[o.advOrderNo] && !fetchingRef.current.has(o.advOrderNo));
+    // Only orders needing a decision get their detail prefetched. A row that is
+    // merely waiting on the counterpart has nothing to decide, so paying a
+    // request for its bank details would spend rate limit that the actionable
+    // rows need. Its detail loads when the modal is opened.
+    const missing = items.filter(o => actionFor(o) && !details[o.advOrderNo] && !fetchingRef.current.has(o.advOrderNo));
     if (missing.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -91,10 +99,13 @@ export default function ActionQueue() {
     if (!order || busy) return;
     setBusy(order.advOrderNo);
     try {
+      const kind = actionFor(order);
       const ok = await runAction(order.merchantId, order);
       if (ok) {
         setDoneFlash(order.advOrderNo);
-        setTimeout(() => { removeFromQueue(order.advOrderNo); setDoneFlash(null); }, 900);
+        // 'confirm' leaves the order running — the row stays and flips to
+        // "waiting"; only 'release' finishes it and removes the row.
+        setTimeout(() => { applyActionLocally(order.advOrderNo, kind); setDoneFlash(null); }, 900);
         refreshQueue();
       }
     } finally { setBusy(null); }
@@ -115,7 +126,7 @@ export default function ActionQueue() {
       else if (k === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(0, c - 1)); }
       else if (k === 'r' && actionFor(items[cursor]) === 'release') { e.preventDefault(); act(items[cursor]); }
       else if (k === 'c' && actionFor(items[cursor]) === 'confirm') { e.preventDefault(); act(items[cursor]); }
-      else if (e.key === 'Enter') { e.preventDefault(); act(items[cursor]); }
+      else if (e.key === 'Enter' && actionFor(items[cursor])) { e.preventDefault(); act(items[cursor]); }
       else if (k === 'd') { e.preventDefault(); setDetailOrder(items[cursor]); }
       else if (k === 'g') { e.preventDefault(); refreshQueue(); }
     };
@@ -144,9 +155,16 @@ export default function ActionQueue() {
         <header className="glass border-b flex items-center gap-2 px-3 sm:px-4 h-14 flex-shrink-0">
           <Zap size={17} className="text-brand-300 flex-shrink-0" />
           <h1 className="font-display font-semibold text-surface-50 text-[15px]">Antrian</h1>
-          <span className={`text-xs rounded-md px-2 py-0.5 font-semibold ${items.length ? 'bg-brand-500/15 text-brand-300' : 'bg-surface-800 text-surface-300'}`}>
-            {items.length}
+          <span className={`text-xs rounded-md px-2 py-0.5 font-semibold ${nActionable ? 'bg-brand-500/15 text-brand-300' : 'bg-surface-800 text-surface-300'}`}
+            title="Perlu aksi sekarang">
+            {nActionable}
           </span>
+          {items.length > nActionable && (
+            <span className="text-xs rounded-md px-2 py-0.5 bg-surface-800 text-surface-300"
+              title="Order berjalan yang belum perlu aksi">
+              +{items.length - nActionable} jalan
+            </span>
+          )}
           <span className="hidden sm:inline text-xs text-surface-300 truncate">
             {meta.merchants.length} merchant{meta.lastError ? ' · sebagian gagal dimuat' : ''}
           </span>
@@ -175,11 +193,12 @@ export default function ActionQueue() {
               <div className="w-14 h-14 rounded-2xl bg-buy/10 border border-buy/25 flex items-center justify-center mb-1">
                 <CheckCircle2 size={24} className="text-buy" />
               </div>
-              <p className="text-surface-50 font-medium">Antrian kosong</p>
-              <p className="text-sm text-surface-300 max-w-xs">Tidak ada order yang menunggu tindakan Anda saat ini.</p>
+              <p className="text-surface-50 font-medium">Tidak ada order berjalan</p>
+              <p className="text-sm text-surface-300 max-w-xs">Semua order sudah selesai. Order yang sudah kelar tidak ditampilkan di sini.</p>
             </div>
           ) : items.map((o, i) => {
             const kind = actionFor(o);
+            const waiting = !kind;
             const d = details[o.advOrderNo];
             const remaining = o.payTimeLimit ? o.payTimeLimit - now : 0;
             const cd = fmtRemaining(remaining);
@@ -195,9 +214,18 @@ export default function ActionQueue() {
               : 0;
 
             return (
-              <div key={o.advOrderNo} ref={el => rowsRef.current[i] = el}
+              <div key={o.advOrderNo}>
+              {i === waitingFrom && waitingFrom > 0 && (
+                <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 bg-surface-900/60 border-y border-surface-700/60">
+                  <Hourglass size={11} className="text-surface-300" />
+                  <span className="text-[11px] uppercase tracking-wide text-surface-300">
+                    Berjalan — belum perlu aksi Anda
+                  </span>
+                </div>
+              )}
+              <div ref={el => rowsRef.current[i] = el}
                 onMouseEnter={() => setCursor(i)}
-                className={`border-b border-surface-700/60 border-l-2 transition-colors ${
+                className={`border-b border-surface-700/60 border-l-2 transition-colors ${waiting ? 'opacity-[0.72] hover:opacity-100 ' : ''}${
                   flashed ? 'bg-buy/15 border-l-buy'
                   : priorCount > 0 ? 'bg-sell/[0.06] border-l-sell'
                   : selected ? 'bg-surface-900/70 border-l-brand-400'
@@ -223,7 +251,7 @@ export default function ActionQueue() {
                         )}
                       </div>
 
-                      <p className="text-2xl sm:text-3xl font-mono font-semibold tnum leading-none text-surface-50">
+                      <p className={`font-mono font-semibold tnum leading-none text-surface-50 ${waiting ? 'text-lg sm:text-xl' : 'text-2xl sm:text-3xl'}`}>
                         {formatAmount(o.amount, 0)}
                         <span className="text-xs text-surface-300 font-sans font-normal ml-1.5">{o.fiatUnit}</span>
                         <button onClick={() => copy(o.amount, 'Nominal')} title="Salin nominal"
@@ -252,15 +280,24 @@ export default function ActionQueue() {
                       )}
                     </div>
 
-                    <button onClick={() => act(o)} disabled={!!busy}
-                      className={`flex-shrink-0 flex items-center justify-center gap-1.5 text-sm font-medium rounded-lg px-3 sm:px-4 h-11 min-w-[104px] sm:min-w-[132px] transition-all disabled:opacity-40 ${
-                        kind === 'release'
-                          ? 'bg-buy/15 text-buy border border-buy/30 hover:bg-buy/25 hover:shadow-glow-buy'
-                          : 'bg-brand-500/15 text-brand-300 border border-brand-500/30 hover:bg-brand-500/25 hover:shadow-glow-sm'}`}>
-                      {isBusy ? <RefreshCw size={15} className="animate-spin" />
-                        : kind === 'release' ? <><Coins size={15} /> Release</>
-                        : <><CheckCircle2 size={15} /> Konfirmasi</>}
-                    </button>
+                    {waiting ? (
+                      // No button at all — a disabled one invites clicking and
+                      // then explaining why nothing happened.
+                      <div className="flex-shrink-0 flex items-center justify-center gap-1.5 text-xs text-surface-300 rounded-lg px-3 sm:px-4 h-11 min-w-[104px] sm:min-w-[132px] border border-dashed border-surface-700 text-center leading-tight">
+                        <Hourglass size={13} className="flex-shrink-0" />
+                        {o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
+                      </div>
+                    ) : (
+                      <button onClick={() => act(o)} disabled={!!busy}
+                        className={`flex-shrink-0 flex items-center justify-center gap-1.5 text-sm font-medium rounded-lg px-3 sm:px-4 h-11 min-w-[104px] sm:min-w-[132px] transition-all disabled:opacity-40 ${
+                          kind === 'release'
+                            ? 'bg-buy/15 text-buy border border-buy/30 hover:bg-buy/25 hover:shadow-glow-buy'
+                            : 'bg-brand-500/15 text-brand-300 border border-brand-500/30 hover:bg-brand-500/25 hover:shadow-glow-sm'}`}>
+                        {isBusy ? <RefreshCw size={15} className="animate-spin" />
+                          : kind === 'release' ? <><Coins size={15} /> Release</>
+                          : <><CheckCircle2 size={15} /> Konfirmasi</>}
+                      </button>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-2 mt-3 pt-2.5 border-t border-surface-700/50">
@@ -276,6 +313,7 @@ export default function ActionQueue() {
                     {o.unreadCount > 0 && <span className="ml-1 bg-sell/15 text-sell rounded px-1.5">{o.unreadCount} baru</span>}
                   </button>
                 </div>
+              </div>
               </div>
             );
           })}

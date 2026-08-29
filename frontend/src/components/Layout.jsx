@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { LayoutDashboard, Users, UserPlus, BookUser, Settings, LogOut, Zap } from 'lucide-react';
-import { subscribeQueue, getQueueCount } from '../actionQueue';
+import { subscribeQueue, getActionableCount } from '../actionQueue';
 
 const NAV = [
   { to: '/',         icon: LayoutDashboard, label: 'Dashboard', short: 'Home'   },
@@ -21,7 +21,9 @@ export default function Layout({ children }) {
   // Pending-action count, visible from every page (one shared poller).
   const [, tick] = useState(0);
   useEffect(() => subscribeQueue(() => tick(t => t + 1)), []);
-  const pending = getQueueCount();
+  // Deliberately NOT the full running-order count: the badge answers "is there
+  // work for me right now", and orders merely waiting on the counterpart are not.
+  const pending = getActionableCount();
 
   return (
     <div className="min-h-screen bg-surface-950 flex flex-col md:flex-row">
