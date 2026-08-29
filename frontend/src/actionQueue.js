@@ -1,4 +1,5 @@
-import { merchantApi, ordersApi } from './api';
+import { merchantApi, ordersApi, registryApi } from './api';
+import { announceOrderChanges } from './orderEvents';
 import { normalizeState } from './components/helpers';
 import { actionFor } from './actions';
 
@@ -29,7 +30,13 @@ const RUNNING = [0, 1, 2, 3];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING
 
 let items = [];
 let actionableCount = 0;
-let activeByMerchant = {};   // merchantId -> count of orders still running (state 0..3)
+let activeByMerchant = {};
+let buyerLogOn = {};          // merchantId -> is the buyer-log/duplicate alert enabled
+let nameIndex = {};           // normalised KYC name -> [advOrderNo] (across all merchants)
+let nameIndexAt = 0;
+const prevStates = {};        // merchantId -> { advOrderNo: state }
+const prevUnread = {};        // merchantId -> { advOrderNo: unreadCount }
+const seededMerchants = new Set();   // merchantId -> count of orders still running (state 0..3)
 let merchants = [];
 let listeners = [];
 let timer = null;
@@ -47,7 +54,11 @@ export function getActionableCount() { return actionableCount; }
 /** Running-order count per merchant — lets the dashboard badge every merchant
  *  chip so you can see where the activity is without opening each panel. */
 export function getActiveByMerchant() { return activeByMerchant; }
-export function getQueueMeta() { return { lastError, lastSync, merchants }; }
+export function getQueueMeta() { return { lastError, lastSync, merchants, buyerLogOn }; }
+/** Permanent buyer-name index, shared so the queue page doesn't fetch its own. */
+export function getNameIndex() { return nameIndex; }
+/** Is the duplicate-name alert switched on for this merchant? */
+export function isBuyerLogOn(mid) { return !!buyerLogOn[mid]; }
 
 export async function refreshQueue() {
   if (inFlight) return;
@@ -56,6 +67,23 @@ export async function refreshQueue() {
     if (merchants.length === 0) {
       const r = await merchantApi.list();
       merchants = r.data || [];
+      // Which merchants have "Catat buyer & alert nama" ON. The duplicate badge
+      // and its sound are gated on this, per merchant.
+      await Promise.all(merchants.map(async m => {
+        try { const s = await merchantApi.getSettings(m.id); buyerLogOn[m.id] = !!s.data?.buyerLog; }
+        catch { /* leave as-is; a settings blip must not silence the queue */ }
+      }));
+    }
+
+    // The buyer log is written by the server worker, so this tab never hears
+    // about new entries by itself. Refresh periodically or a buyer whose first
+    // order completed after page load would never raise the alert.
+    if (Object.values(buyerLogOn).some(Boolean) && Date.now() - nameIndexAt > 45000) {
+      try {
+        const r = await registryApi.list(merchants[0].id, true);
+        nameIndex = r.data?.nameIndex || nameIndex;
+        nameIndexAt = Date.now();
+      } catch { /* keep last */ }
     }
     const now = Date.now();
     const results = await Promise.all(merchants.map(async (m) => {
@@ -68,6 +96,21 @@ export async function refreshQueue() {
         const raw = r.data;
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
         const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name }));
+        // Announce over every order in the window, not just the running ones —
+        // otherwise a transition INTO done/cancelled/timeout would be silent,
+        // because those orders leave the running list at the same moment.
+        const seeded = seededMerchants.has(m.id);
+        const { states, unread } = announceOrderChanges({
+          merchantId: m.id,
+          merchantName: m.name,
+          orders: norm,
+          prevStates: prevStates[m.id] || {},
+          prevUnread: prevUnread[m.id] || {},
+          first: !seeded,
+        });
+        prevStates[m.id] = states; prevUnread[m.id] = unread;
+        seededMerchants.add(m.id);
+
         const running = norm.filter(o => RUNNING.includes(o._state));
         return {
           mid: m.id,
@@ -132,7 +175,7 @@ export function removeFromQueue(advOrderNo) {
 }
 
 /** Force a merchant-list refetch (e.g. after adding/removing a merchant). */
-export function resetQueueMerchants() { merchants = []; }
+export function resetQueueMerchants() { merchants = []; buyerLogOn = {}; nameIndexAt = 0; }
 
 export function subscribeQueue(fn) {
   listeners.push(fn);

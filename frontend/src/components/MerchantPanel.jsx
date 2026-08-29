@@ -4,8 +4,8 @@ import {
   OrderStateBadge, SideBadge, AdStatusBadge, formatTime, formatAmount, formatCompact,
   ORDER_STATES, normalizeState,
 } from './helpers';
-import { playSound, soundForState } from '../sounds';
-import { shouldAnnounce } from '../announce';
+import { playSound } from '../sounds';
+import { announceOrderChanges } from '../orderEvents';
 import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
 import OrderDetailModal from './OrderDetailModal';
@@ -161,34 +161,16 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           .sort((a, b) => (b.createTime || 0) - (a.createTime || 0));
       }
 
-      if (initialized.current) {
-        let newActive = 0, prevActive = 0;
-        normalized.forEach(o => {
-          const ps = prevStates.current[o.advOrderNo];
-          const pu = prevUnread.current[o.advOrderNo];
-          // shouldAnnounce keeps other tabs of the same browser quiet — the
-          // first tab to see an event claims it, the rest skip.
-          if (ps !== undefined && ps !== o._state
-              && shouldAnnounce(`st:${merchant.id}:${o.advOrderNo}:${o._state}`)) {
-            const ev = soundForState(o._state); // paid / done / cancelled — silent for intermediate states
-            if (ev) playSound(ev);
-            toast(`${o.userInfo?.nickName || 'Order'}: ${ORDER_STATES[ps]?.label || ps} → ${ORDER_STATES[o._state]?.label || o._state}`, { duration: 5000 });
-          }
-          if (pu !== undefined && (o.unreadCount || 0) > pu
-              && shouldAnnounce(`msg:${merchant.id}:${o.advOrderNo}:${o.unreadCount}`)) {
-            playSound('message');
-            toast(`${o.userInfo?.nickName || 'Buyer'}: pesan baru`, { duration: 3000 });
-          }
-          if ([0, 1, 2, 3].includes(o._state)) newActive++;
-        });
-        Object.values(prevStates.current).forEach(s => { if ([0, 1, 2, 3].includes(s)) prevActive++; });
-        if (newActive > prevActive && shouldAnnounce(`new:${merchant.id}:${newActive}`, 8000)) {
-          playSound('newOrder'); toast.success(`Order baru — ${merchant.name}`, { duration: 4000 });
-        }
-      }
-
-      const ns = {}, nu = {};
-      normalized.forEach(o => { ns[o.advOrderNo] = o._state; nu[o.advOrderNo] = o.unreadCount || 0; });
+      // Shared with the app-wide queue poller — same event ids, so whichever
+      // sees a change first announces it and the other stays quiet.
+      const { states: ns, unread: nu } = announceOrderChanges({
+        merchantId: merchant.id,
+        merchantName: merchant.name,
+        orders: normalized,
+        prevStates: prevStates.current,
+        prevUnread: prevUnread.current,
+        first: !initialized.current,
+      });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
       ordersRef.current = normalized;
       setOrders(normalized); setLastSync(Date.now()); setSyncError(false); syncErrorRef.current = false;

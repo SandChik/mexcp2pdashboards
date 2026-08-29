@@ -3,9 +3,10 @@ import Layout from '../components/Layout';
 import OrderDetailModal from '../components/OrderDetailModal';
 import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge } from '../components/helpers';
 import { runAction, actionFor } from '../actions';
-import { getQueue, subscribeQueue, refreshQueue, applyActionLocally, getQueueMeta, getActionableCount } from '../actionQueue';
-import { ordersApi, registryApi } from '../api';
-import { Zap, RefreshCw, Keyboard, CheckCircle2, Coins, AlertTriangle, Clock, ExternalLink, Copy, User, Landmark, Hourglass } from 'lucide-react';
+import { getQueue, subscribeQueue, refreshQueue, applyActionLocally, getQueueMeta, getActionableCount, getNameIndex, isBuyerLogOn } from '../actionQueue';
+import { ordersApi } from '../api';
+import { announceDuplicate } from '../orderEvents';
+import { Zap, RefreshCw, Keyboard, CheckCircle2, Coins, AlertTriangle, Clock, MessageSquare, Copy, User, Landmark, Hourglass, Store } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 function fmtRemaining(ms) {
@@ -16,6 +17,14 @@ function fmtRemaining(ms) {
 }
 const normName = v => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const KYC = ['None', 'Primary', 'Advanced'];
+// Merchant identity colours — enough contrast between neighbours that two
+// accounts never read as one.
+const MERCHANT_TONES = [
+  { chip: 'bg-brand-500/15 text-brand-300 ring-brand-500/30', bar: 'bg-brand-400' },
+  { chip: 'bg-buy/15 text-buy ring-buy/30',                   bar: 'bg-buy' },
+  { chip: 'bg-warning/15 text-warning ring-warning/30',       bar: 'bg-warning' },
+  { chip: 'bg-sell/15 text-sell ring-sell/30',                bar: 'bg-sell' },
+];
 
 export default function ActionQueue() {
   const [, tick] = useState(0);
@@ -26,8 +35,8 @@ export default function ActionQueue() {
   const [detailOrder, setDetailOrder] = useState(null);
   const [showKeys, setShowKeys] = useState(false);
   const [details, setDetails] = useState({});   // advOrderNo -> full order detail
-  const [nameIdx, setNameIdx] = useState({});   // merchantId -> { normalisedName: [advOrderNo] }
   const rowsRef = useRef([]);
+  const dupSeen = useRef(new Set());
   const fetchingRef = useRef(new Set());
 
   useEffect(() => subscribeQueue(() => tick(t => t + 1)), []);
@@ -43,11 +52,11 @@ export default function ActionQueue() {
   // Fetch each queued order's detail ONCE and keep it, so every row carries
   // what you need to decide — opening a modal per order defeats the point.
   useEffect(() => {
-    // Only orders needing a decision get their detail prefetched. A row that is
-    // merely waiting on the counterpart has nothing to decide, so paying a
-    // request for its bank details would spend rate limit that the actionable
-    // rows need. Its detail loads when the modal is opened.
-    const missing = items.filter(o => actionFor(o) && !details[o.advOrderNo] && !fetchingRef.current.has(o.advOrderNo));
+    // EVERY running row, not just the actionable ones. The duplicate-KYC alert
+    // needs realName, which only the detail endpoint returns — scoping this to
+    // actionable rows made a repeat buyer invisible until they had already paid,
+    // which is the latest possible moment to find out.
+    const missing = items.filter(o => !details[o.advOrderNo] && !fetchingRef.current.has(o.advOrderNo));
     if (missing.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -72,28 +81,33 @@ export default function ActionQueue() {
     return () => { cancelled = true; };
   }, [items, details]);
 
-  // Buyer-log name index → warn BEFORE releasing if this KYC name already ordered.
-  useEffect(() => {
-    let stop = false;
-    const load = async () => {
-      // One request, across all merchants — a repeat buyer who switches
-      // merchant must still raise the alert.
-      const first = (meta.merchants || [])[0];
-      if (!first) return;
-      try {
-        const r = await registryApi.list(first.id, true);
-        if (!stop) setNameIdx(r.data?.nameIndex || {});
-      } catch { /* keep last */ }
-    };
-    if (meta.merchants?.length) {
-      load();
-      const i = setInterval(load, 60000);
-      return () => { stop = true; clearInterval(i); };
-    }
-    return () => { stop = true; };
-  }, [meta.merchants?.length]); // eslint-disable-line
+  // Buyer-log name index — owned by the shared poller so it stays fresh on every
+  // page, not just while this one is open.
+  const nameIdx = getNameIndex();
 
   useEffect(() => { if (cursor >= items.length) setCursor(Math.max(0, items.length - 1)); }, [items.length, cursor]);
+
+  // Stable colour per merchant, assigned by position in the merchant list, so
+  // "which account is this?" is answerable at a glance instead of by reading.
+  const merchantTone = useCallback((mid) => {
+    const i = (meta.merchants || []).findIndex(m => m.id === mid);
+    return MERCHANT_TONES[(i < 0 ? 0 : i) % MERCHANT_TONES.length];
+  }, [meta.merchants]);
+
+  // Duplicate-KYC alert. Gated on that merchant's "Catat buyer & alert nama"
+  // switch, and fired once per order — a repeat buyer sitting in the queue for
+  // ten minutes must not sound every poll.
+  useEffect(() => {
+    items.forEach(o => {
+      if (!isBuyerLogOn(o.merchantId)) return;
+      const rn = details[o.advOrderNo]?.userInfo?.realName;
+      if (!rn) return;
+      const times = (nameIdx[normName(rn)] || []).filter(n => n !== o.advOrderNo).length;
+      if (times < 1 || dupSeen.current.has(o.advOrderNo)) return;
+      dupSeen.current.add(o.advOrderNo);
+      announceDuplicate({ merchantId: o.merchantId, advOrderNo: o.advOrderNo, realName: rn, times: times + 1 });
+    });
+  }, [items, details, nameIdx]);
 
   const act = useCallback(async (order) => {
     if (!order || busy) return;
@@ -187,9 +201,9 @@ export default function ActionQueue() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-2 sm:space-y-2.5">
           {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-2 px-6 text-center">
+            <div className="flex flex-col items-center justify-center h-full gap-2 px-6 text-center py-16">
               <div className="w-14 h-14 rounded-2xl bg-buy/10 border border-buy/25 flex items-center justify-center mb-1">
                 <CheckCircle2 size={24} className="text-buy" />
               </div>
@@ -199,6 +213,7 @@ export default function ActionQueue() {
           ) : items.map((o, i) => {
             const kind = actionFor(o);
             const waiting = !kind;
+            const tone = merchantTone(o.merchantId);
             const d = details[o.advOrderNo];
             const remaining = o.payTimeLimit ? o.payTimeLimit - now : 0;
             const cd = fmtRemaining(remaining);
@@ -209,33 +224,41 @@ export default function ActionQueue() {
 
             const realName = d?.userInfo?.realName || null;
             const pay = d?.confirmPaymentInfo || d?.paymentInfo?.[0] || null;
-            const priorCount = realName
+            // Only when that merchant has "Catat buyer & alert nama" switched on.
+            const priorCount = (realName && isBuyerLogOn(o.merchantId))
               ? (nameIdx[normName(realName)] || []).filter(n => n !== o.advOrderNo).length
               : 0;
 
             return (
               <div key={o.advOrderNo}>
               {i === waitingFrom && waitingFrom > 0 && (
-                <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 bg-surface-900/60 border-y border-surface-700/60">
-                  <Hourglass size={11} className="text-surface-300" />
-                  <span className="text-[11px] uppercase tracking-wide text-surface-300">
-                    Berjalan — belum perlu aksi Anda
+                <div className="flex items-center gap-2 pt-3 pb-1">
+                  <span className="h-px flex-1 bg-surface-700" />
+                  <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-surface-300">
+                    <Hourglass size={11} /> Berjalan — belum perlu aksi Anda
                   </span>
+                  <span className="h-px flex-1 bg-surface-700" />
                 </div>
               )}
               <div ref={el => rowsRef.current[i] = el}
                 onMouseEnter={() => setCursor(i)}
-                className={`border-b border-surface-700/60 border-l-2 transition-colors ${waiting ? 'opacity-[0.72] hover:opacity-100 ' : ''}${
-                  flashed ? 'bg-buy/15 border-l-buy'
-                  : priorCount > 0 ? 'bg-sell/[0.06] border-l-sell'
-                  : selected ? 'bg-surface-900/70 border-l-brand-400'
-                  : 'border-l-transparent hover:bg-surface-900/40'}`}>
-                <div className="px-3 sm:px-4 py-3">
+                className={`relative overflow-hidden rounded-xl border transition-all ${waiting ? 'opacity-[0.78] hover:opacity-100 ' : ''}${
+                  flashed ? 'bg-buy/15 border-buy/50'
+                  : priorCount > 0 ? 'bg-sell/[0.07] border-sell/45'
+                  : selected ? 'bg-surface-900 border-brand-500/45 shadow-lift'
+                  : 'bg-surface-900/50 border-surface-700 hover:border-surface-600'}`}>
+                {/* Merchant spine — same colour as the chip, so the account is
+                    identifiable from the edge of the card alone. */}
+                <span className={`absolute left-0 top-0 bottom-0 w-1 ${tone.bar} ${waiting ? 'opacity-50' : ''}`} />
+                <div className="pl-4 pr-3 sm:pl-5 sm:pr-4 py-3">
 
                   <div className="flex items-start gap-3 sm:gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="text-[11px] text-surface-300 font-medium">{o.merchantName}</span>
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-md px-2 py-0.5 ring-1 ${tone.chip}`}
+                          title={`Merchant: ${o.merchantName}`}>
+                          <Store size={10} /> {o.merchantName}
+                        </span>
                         <SideBadge side={o.side} />
                         <OrderStateBadge state={o._state} />
                         {cd && (
@@ -308,9 +331,12 @@ export default function ActionQueue() {
                   </div>
 
                   <button onClick={() => setDetailOrder(o)}
-                    className="mt-2 inline-flex items-center gap-1 text-[11px] text-surface-300 hover:text-brand-300 transition-colors">
-                    <ExternalLink size={11} /> Buka chat
-                    {o.unreadCount > 0 && <span className="ml-1 bg-sell/15 text-sell rounded px-1.5">{o.unreadCount} baru</span>}
+                    className={`mt-3 w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg px-3 h-9 border transition-colors ${
+                      o.unreadCount > 0
+                        ? 'bg-sell/15 text-sell border-sell/40 hover:bg-sell/25'
+                        : 'bg-surface-800 text-surface-100 border-surface-600 hover:bg-surface-700 hover:border-surface-500'}`}>
+                    <MessageSquare size={13} />
+                    {o.unreadCount > 0 ? `Chat · ${o.unreadCount} pesan baru` : 'Buka chat'}
                   </button>
                 </div>
               </div>
