@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ordersApi, adsApi } from '../api';
+import { ordersApi, adsApi, merchantApi } from '../api';
 import {
   OrderStateBadge, SideBadge, AdStatusBadge, PlatformBadge, formatTime, formatAmount, formatCompact,
   ORDER_STATES, normalizeState,
@@ -8,7 +8,9 @@ import { playSound } from '../sounds';
 import { announceOrderChanges } from '../orderEvents';
 import { actionFor, runAction } from '../actions';
 import OrderDetailModal from './OrderDetailModal';
-import { RefreshCw, Clock, AlertTriangle, MessageSquare, Coins, CheckCircle2, WifiOff, Megaphone, ListOrdered } from 'lucide-react';
+import BingxAdModal from './BingxAdModal';
+import { askConfirm } from './confirm';
+import { RefreshCw, Clock, AlertTriangle, MessageSquare, Coins, CheckCircle2, WifiOff, Megaphone, ListOrdered, Plus, Pencil, Pause, Play, MoreVertical, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 /**
@@ -16,9 +18,10 @@ import toast from 'react-hot-toast';
  *
  * Same data contract (the backend already translated BingX orders into the
  * house shape), same shared pieces (announceOrderChanges, actionFor/runAction,
- * OrderDetailModal), but deliberately WITHOUT the MEXC-only controls
- * (service switch, balance, pause, ad editing) — BingX has no equivalent for
- * the first two, and ad management is a later slice. Keeping it separate
+ * OrderDetailModal), but WITHOUT the MEXC-only controls (service switch,
+ * balance) — BingX has no equivalent. Ads: quick price, list/delist,
+ * pause-all (= delist every live ad, the only way to "close shop" on BingX),
+ * and full edit/create through BingxAdModal. Keeping this component separate
  * means MerchantPanel stays exactly as it was.
  */
 
@@ -52,6 +55,15 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
   const [rowDone, setRowDone]       = useState(null);
   const [nameMap, setNameMap]       = useState({});   // advOrderNo -> { realName, nickName }
   const nameMapRef = useRef({});
+  // Ads
+  const [showAdModal, setShowAdModal] = useState(false);
+  const [editAd, setEditAd]           = useState(null);
+  const [priceEdit, setPriceEdit]     = useState(null); // { advNo, value } while the inline price box is open
+  const [adBusy, setAdBusy]           = useState(null); // advNo mid-request
+  const [pausedAds, setPausedAds]     = useState([]);
+  const [busyTrading, setBusyTrading] = useState(false);
+  const [menuOpen, setMenuOpen]       = useState(false);
+  const menuRef = useRef(null);
 
   const prevStates  = useRef({});
   const prevUnread  = useRef({});
@@ -62,6 +74,12 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
   useEffect(() => { rangeRef.current = dateRange; }, [dateRange]);
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
+  useEffect(() => {
+    const h = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
 
   // KYC names per row — the backend resolves them from order detail and caches
   // them, so each order costs one BingX call, ever. Active orders first.
@@ -163,6 +181,82 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
     } finally { setRowBusy(null); }
   }
 
+  // ── Ads ─────────────────────────────────────────────────────────────
+  async function setAdStatus(ad, status) {
+    const r = await adsApi.toggleStatus(merchant.id, { advNo: ad.advNo }, status);
+    return r.data || {};
+  }
+  async function toggleAd(ad) {
+    if (adBusy) return;
+    const to = ad.advStatus === 'OPEN' ? 'CLOSE' : 'OPEN';
+    setAdBusy(ad.advNo);
+    try {
+      const d = await setAdStatus(ad, to);
+      if (d.code === 0) { toast.success(to === 'OPEN' ? 'Iklan tayang' : 'Iklan diturunkan'); fetchAds(); }
+      else toast.error(`BingX menolak: ${d.msg || 'error'}`);
+    } catch (e) { toast.error(e.response?.data?.msg || e.message); }
+    finally { setAdBusy(null); }
+  }
+  async function saveQuickPrice(ad) {
+    if (!priceEdit || priceEdit.advNo !== ad.advNo) return;
+    const v = String(priceEdit.value).trim();
+    if (!(Number(v) > 0)) { toast.error('Harga harus angka lebih dari 0'); return; }
+    if (v === String(ad.priceType === 2 ? ad.floatRatio : ad.price)) { setPriceEdit(null); return; }
+    setAdBusy(ad.advNo);
+    try {
+      const r = await adsApi.setPrice(merchant.id, ad.priceType === 2
+        ? { advNo: ad.advNo, priceType: 2, floatRatio: v }
+        : { advNo: ad.advNo, priceType: 1, fixedPrice: v });
+      if (r.data?.code === 0) { toast.success(`Harga → ${v}${ad.priceType === 2 ? '%' : ''}`); setPriceEdit(null); fetchAds(); }
+      else toast.error(`BingX menolak: ${r.data?.msg || 'error'}`);
+    } catch (e) { toast.error(e.response?.data?.msg || e.message); }
+    finally { setAdBusy(null); }
+  }
+  async function pauseTrading() {
+    setMenuOpen(false);
+    if (busyTrading) return;
+    const openAds = ads.filter(a => a.advStatus === 'OPEN');
+    if (openAds.length === 0) { toast.error(`${merchant.name}: tidak ada iklan tayang`); return; }
+    if (!await askConfirm({ title: `Jeda — ${merchant.name} (BingX)`, message: `Menurunkan ${openAds.length} iklan tayang dan mengingatnya. "Lanjutkan" menayangkan kembali iklan yang sama.`, confirmText: 'Turunkan semua', danger: true })) return;
+    setBusyTrading(true);
+    const tid = toast.loading('Menurunkan iklan…');
+    try {
+      const closed = [], failed = [];
+      for (const ad of openAds) {
+        try { const d = await setAdStatus(ad, 'CLOSE'); if (d.code === 0) closed.push(ad.advNo); else failed.push(`#${ad.advNo}: ${d.msg || 'error'}`); }
+        catch (e) { failed.push(`#${ad.advNo}: ${e.response?.data?.msg || e.message}`); }
+      }
+      await merchantApi.setPauseState(merchant.id, closed.length > 0, closed).catch(() => {});
+      setPausedAds(closed); fetchAds();
+      if (failed.length === 0) toast.success(`Dijeda — ${closed.length} iklan diturunkan`, { id: tid });
+      else toast.error(`${closed.length} diturunkan, ${failed.length} gagal: ${failed.join('; ')}`, { id: tid, duration: 10000 });
+    } finally { setBusyTrading(false); }
+  }
+  async function resumeTrading() {
+    setMenuOpen(false);
+    if (busyTrading) return;
+    setBusyTrading(true);
+    const tid = toast.loading('Menayangkan kembali…');
+    try {
+      let snapshot = pausedAds;
+      try { const r = await merchantApi.getPauseState(merchant.id); snapshot = r.data?.ads || pausedAds; } catch { /* keep */ }
+      const targets = ads.filter(a => snapshot.includes(a.advNo));
+      if (targets.length === 0) {
+        await merchantApi.setPauseState(merchant.id, false, []).catch(() => {});
+        setPausedAds([]); toast.error('Tidak ada iklan yang dijeda', { id: tid }); return;
+      }
+      const failedNos = []; let ok = 0;
+      for (const ad of targets) {
+        try { const d = await setAdStatus(ad, 'OPEN'); if (d.code === 0) ok++; else failedNos.push(ad.advNo); }
+        catch { failedNos.push(ad.advNo); }
+      }
+      await merchantApi.setPauseState(merchant.id, failedNos.length > 0, failedNos).catch(() => {});
+      setPausedAds(failedNos); fetchAds();
+      if (failedNos.length === 0) toast.success(`${ok} iklan tayang lagi`, { id: tid });
+      else toast.error(`${ok} tayang, ${failedNos.length} gagal — tekan Lanjutkan lagi`, { id: tid, duration: 10000 });
+    } finally { setBusyTrading(false); }
+  }
+
   // Derived
   const filteredOrders = orders.filter(o => {
     const f = ORDER_FILTERS.find(f => f.key === orderFilter);
@@ -198,11 +292,34 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
             {refreshing && <RefreshCw size={11} className="text-brand-400 animate-spin flex-shrink-0" />}
             {syncError && <span className="flex items-center gap-1 bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0"><WifiOff size={11} /> sync gagal</span>}
             {unread > 0 && <span className="bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0" title="Balas lewat aplikasi BingX — chat di dashboard menyusul">{unread} belum dibaca</span>}
+            {pausedAds.length > 0 && <span className="bg-warning/15 text-warning text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{pausedAds.length} dijeda</span>}
           </div>
-          <button onClick={() => { doFetch(false); fetchAds(); }} title="Refresh panel ini"
-            className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:text-surface-50 hover:bg-surface-700 transition-colors">
-            <RefreshCw size={14} />
-          </button>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button onClick={() => { doFetch(false); fetchAds(); }} title="Refresh panel ini"
+              className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:text-surface-50 hover:bg-surface-700 transition-colors">
+              <RefreshCw size={14} />
+            </button>
+            <div className="relative" ref={menuRef}>
+              <button onClick={() => setMenuOpen(m => !m)}
+                className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:text-surface-50 hover:bg-surface-700 transition-colors">
+                <MoreVertical size={15} />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-8 z-20 w-56 bg-surface-800 border border-surface-700 rounded-lg p-1 shadow-xl shadow-black/40">
+                  <button onClick={pauseTrading} disabled={busyTrading}
+                    className="w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors disabled:opacity-40 text-warning hover:bg-warning/10">
+                    <Pause size={13} /> Jeda — turunkan semua iklan
+                  </button>
+                  {pausedAds.length > 0 && (
+                    <button onClick={resumeTrading} disabled={busyTrading}
+                      className="w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors disabled:opacity-40 text-buy hover:bg-buy/10">
+                      <Play size={13} /> Lanjutkan — tayangkan {pausedAds.length} iklan
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Stats */}
@@ -319,33 +436,71 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
             );
           })
         ) : (
-          ads.length === 0 ? (
-            <div className="text-center py-12 px-6">
-              <p className="text-sm text-surface-200">Belum ada iklan.</p>
-              <p className="text-xs text-surface-300 mt-1">Buat iklan lewat aplikasi BingX, lalu refresh panel ini. Kelola iklan dari dashboard menyusul.</p>
-            </div>
-          ) : (
-            <div className="p-2.5 sm:p-3 space-y-2.5">
-              {ads.map(ad => (
-                <div key={ad.advNo} className="bg-surface-900 border border-surface-700 rounded-lg p-3">
+          <div className="p-2.5 sm:p-3 space-y-2.5">
+            <button onClick={() => { setEditAd(null); setShowAdModal(true); }}
+              className="w-full flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg h-9 border border-dashed border-surface-600 text-surface-200 hover:text-surface-50 hover:border-surface-500 transition-colors">
+              <Plus size={13} /> Iklan baru
+            </button>
+            {ads.length === 0 ? (
+              <div className="text-center py-10 px-6">
+                <p className="text-sm text-surface-200">Belum ada iklan.</p>
+                <p className="text-xs text-surface-300 mt-1">Buat dari tombol di atas — langsung tayang di pasar BingX.</p>
+              </div>
+            ) : ads.map(ad => {
+              const busy = adBusy === ad.advNo;
+              const editing = priceEdit?.advNo === ad.advNo;
+              const live = ad.advStatus === 'OPEN';
+              return (
+                <div key={ad.advNo} className={`bg-surface-900 border rounded-lg p-3 ${live ? 'border-surface-700' : 'border-surface-700/60 opacity-80'}`}>
                   <div className="flex items-center justify-between gap-2 mb-1.5">
                     <div className="flex items-center gap-1.5">
                       <SideBadge side={ad.side} />
                       <AdStatusBadge status={ad.advStatus} />
+                      {pausedAds.includes(ad.advNo) && <span className="text-[10px] text-warning">dijeda</span>}
                     </div>
-                    <span className="text-sm font-mono font-semibold tnum text-surface-50">
-                      {ad.priceType === 2 ? `${ad.floatRatio}% mengambang` : `${formatAmount(ad.price, 2)} ${ad.fiatUnit}`}
-                    </span>
+                    {editing ? (
+                      <div className="flex items-center gap-1">
+                        <input autoFocus value={priceEdit.value} inputMode="decimal"
+                          onChange={e => setPriceEdit({ advNo: ad.advNo, value: e.target.value })}
+                          onKeyDown={e => { if (e.key === 'Enter') saveQuickPrice(ad); if (e.key === 'Escape') setPriceEdit(null); }}
+                          className="w-24 bg-surface-950 border border-brand-500/50 rounded-md px-2 py-1 text-sm font-mono text-surface-50 text-right focus:outline-none" />
+                        <span className="text-[11px] text-surface-300">{ad.priceType === 2 ? '%' : ad.fiatUnit}</span>
+                        <button onClick={() => saveQuickPrice(ad)} disabled={busy} title="Simpan (Enter)"
+                          className="w-7 h-7 flex items-center justify-center rounded-md bg-buy/15 text-buy hover:bg-buy/25 disabled:opacity-50">
+                          {busy ? <RefreshCw size={12} className="animate-spin" /> : <Check size={13} />}
+                        </button>
+                        <button onClick={() => setPriceEdit(null)} title="Batal (Esc)"
+                          className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:bg-surface-700"><X size={13} /></button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setPriceEdit({ advNo: ad.advNo, value: ad.priceType === 2 ? ad.floatRatio : ad.price })}
+                        title="Ubah harga (satu panggilan modifyPrice)"
+                        className="group flex items-center gap-1.5 text-sm font-mono font-semibold tnum text-surface-50 hover:text-brand-300 transition-colors">
+                        {ad.priceType === 2 ? `${ad.floatRatio}% mengambang` : `${formatAmount(ad.price, 2)} ${ad.fiatUnit}`}
+                        <Pencil size={11} className="text-surface-300 group-hover:text-brand-300" />
+                      </button>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-surface-300">
                     <span>Sisa: <b className="text-surface-100 font-mono">{formatAmount(ad.availableAmount, 2)}</b> / {formatAmount(ad.totalNumber, 2)} USDT</span>
                     <span>Limit: <b className="text-surface-100 font-mono">{formatCompact(ad.minAmount)} – {formatCompact(ad.maxAmount)}</b></span>
                     <span className="col-span-2 truncate">Bayar: <b className="text-surface-100">{ad.payMethodNames?.length ? ad.payMethodNames.join(' · ') : '-'}</b>{ad.hidePaymentInfo === 1 ? ' · info bayar disembunyikan' : ''}</span>
                   </div>
+                  <div className="flex items-center gap-1.5 mt-2.5">
+                    <button onClick={() => toggleAd(ad)} disabled={busy || busyTrading}
+                      className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg h-8 border transition-colors disabled:opacity-50 ${
+                        live ? 'bg-warning/10 text-warning border-warning/25 hover:bg-warning/20' : 'bg-buy/10 text-buy border-buy/25 hover:bg-buy/20'}`}>
+                      {busy && !editing ? <RefreshCw size={12} className="animate-spin" /> : live ? <><Pause size={12} /> Turunkan</> : <><Play size={12} /> Tayangkan</>}
+                    </button>
+                    <button onClick={() => { setEditAd(ad); setShowAdModal(true); }} disabled={busy}
+                      className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg h-8 border border-surface-600 text-surface-100 hover:bg-surface-700 transition-colors disabled:opacity-50">
+                      <Pencil size={12} /> Edit
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          )
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -353,6 +508,11 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
         <OrderDetailModal merchantId={merchant.id} advOrderNo={selectedOrder} initialTab="detail"
           onClose={() => setSelectedOrder(null)}
           onActionDone={() => doFetch(false, true)} />
+      )}
+      {showAdModal && (
+        <BingxAdModal merchant={merchant} existingAd={editAd}
+          onClose={() => { setShowAdModal(false); setEditAd(null); }}
+          onSaved={() => fetchAds()} />
       )}
     </div>
   );

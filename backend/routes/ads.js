@@ -7,7 +7,16 @@ const { mexcGet, mexcPost } = require('../utils/mexcApi');
 const { getMerchant } = require('../utils/store');
 const { audit } = require('../utils/audit');
 const bx = require('../utils/bingxOrders');
+const bxAds = require('../utils/bingxAds');
 const router = express.Router();
+
+// Uniform error reply for BingX paths: validation errors are 400 with the
+// message, upstream errors keep BingX's own code/msg so the true reason shows.
+function bingxFail(res, err) {
+  const d = err.bingx || err.response?.data;
+  const status = err.status || 500;
+  return res.status(status).json({ code: d?.code ?? -1, msg: d?.msg || err.message, error: d?.msg || err.message });
+}
 
 const KYC_INT_TO_STR = { 0: 'NONE', 1: 'PRIMARY', 2: 'ADVANCED' };
 
@@ -84,7 +93,13 @@ router.get('/:merchantId/market', authMiddleware, async (req, res) => {
 router.post('/:merchantId', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
-  if (bx.isBingx(merchant)) return res.status(501).json({ code: -1, msg: 'Kelola iklan BingX hadir di irisan berikutnya' });
+  if (bx.isBingx(merchant)) {
+    try {
+      const result = await bxAds.saveAd(merchant, req.body);
+      audit({ action: req.body.advNo ? 'ad_save' : 'ad_create', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo || result?.data?.advertNo, side: req.body.side, price: req.body.fixedPrice || `${req.body.floatRatio}%`, code: result?.code, msg: result?.msg });
+      return res.json(result);
+    } catch (err) { return bingxFail(res, err); }
+  }
   try {
     const result = await mexcPost('/api/v3/fiat/merchant/ads/save_or_update',
       req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
@@ -100,7 +115,14 @@ router.post('/:merchantId', authMiddleware, async (req, res) => {
 router.post('/:merchantId/toggle-status', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
-  if (bx.isBingx(merchant)) return res.status(501).json({ code: -1, msg: 'Kelola iklan BingX hadir di irisan berikutnya' });
+  if (bx.isBingx(merchant)) {
+    // BingX: one call, one field. advStatus OPEN → list, CLOSE → delist, DELETE → delete (irreversible).
+    try {
+      const result = await bxAds.setStatus(merchant, req.body.advNo, req.body.advStatus);
+      audit({ action: req.body.advStatus === 'DELETE' ? 'ad_delete' : 'ad_toggle', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, to: req.body.advStatus, code: result?.code, msg: result?.msg });
+      return res.json(result);
+    } catch (err) { return bingxFail(res, err); }
+  }
 
   try {
     const b = req.body;
@@ -164,6 +186,37 @@ router.post('/:merchantId/toggle-status', authMiddleware, async (req, res) => {
     console.error('[toggle] error:', d || err.message);
     res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message, error: d?.msg || err.message });
   }
+});
+
+// ── BingX-only ───────────────────────────────────────────────────────
+// POST /api/ads/:merchantId/price — quick price change (modifyPrice)
+router.post('/:merchantId/price', authMiddleware, async (req, res) => {
+  const merchant = getMerchant(req.params.merchantId);
+  if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX' });
+  try {
+    const result = await bxAds.setPrice(merchant, req.body);
+    audit({ action: 'ad_price', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, price: req.body.fixedPrice || `${req.body.floatRatio}%`, code: result?.code, msg: result?.msg });
+    res.json(result);
+  } catch (err) { bingxFail(res, err); }
+});
+
+// GET /api/ads/:merchantId/config?fiatUnit=IDR&tradeType=2 — allowed ranges + market price
+router.get('/:merchantId/config', authMiddleware, async (req, res) => {
+  const merchant = getMerchant(req.params.merchantId);
+  if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX' });
+  try { res.json({ code: 0, data: await bxAds.assetConfig(merchant, req.query) }); }
+  catch (err) { bingxFail(res, err); }
+});
+
+// GET /api/ads/:merchantId/payment-methods — the merchant's own receiving accounts
+router.get('/:merchantId/payment-methods', authMiddleware, async (req, res) => {
+  const merchant = getMerchant(req.params.merchantId);
+  if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX' });
+  try { res.json({ code: 0, data: await bxAds.myPaymentMethods(merchant) }); }
+  catch (err) { bingxFail(res, err); }
 });
 
 module.exports = router;

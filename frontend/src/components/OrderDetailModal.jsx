@@ -312,9 +312,20 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                 </button>
               </div>
               {showRaw && (
-                <pre className="bg-surface-950 border border-surface-700 rounded-lg p-3 text-[11px] text-surface-200 font-mono overflow-auto max-h-72 whitespace-pre-wrap break-all">
-                  {JSON.stringify(order, null, 2)}
-                </pre>
+                <div className="space-y-2">
+                  {isBingx && order._raw && (
+                    <>
+                      <p className="text-[11px] text-surface-300">Persis seperti yang dikirim BingX:</p>
+                      <pre className="bg-surface-950 border border-warning/30 rounded-lg p-3 text-[11px] text-surface-200 font-mono overflow-auto max-h-72 whitespace-pre-wrap break-all">
+                        {JSON.stringify(order._raw, null, 2)}
+                      </pre>
+                      <p className="text-[11px] text-surface-300">Setelah diterjemahkan ke bentuk dashboard (side dibalik ke sudut pandang lawan, status ke skala MEXC):</p>
+                    </>
+                  )}
+                  <pre className="bg-surface-950 border border-surface-700 rounded-lg p-3 text-[11px] text-surface-200 font-mono overflow-auto max-h-72 whitespace-pre-wrap break-all">
+                    {JSON.stringify(isBingx ? { ...order, _raw: undefined } : order, null, 2)}
+                  </pre>
+                </div>
               )}
               {/* Action alerts */}
               {canRelease && (
@@ -430,9 +441,13 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                     <Row label="Nick" value={order.userInfo.nickName} />
                     {order.userInfo.realName && <Row label="Nama" value={order.userInfo.realName} />}
                     <Row label="KYC" value={
-                      order.userInfo.kycLevel !== undefined && order.userInfo.kycLevel !== null
-                        ? (KYC_LABELS[order.userInfo.kycLevel] || `Level ${order.userInfo.kycLevel}`)
-                        : 'Tidak tersedia'
+                      isBingx
+                        // BingX never sends a level; a real name in the payload means
+                        // the account passed KYC (P2P on BingX requires it).
+                        ? (order.userInfo.realName ? 'Terverifikasi (nama KYC dari BingX)' : 'Tidak tersedia dari API BingX')
+                        : order.userInfo.kycLevel !== undefined && order.userInfo.kycLevel !== null
+                          ? (KYC_LABELS[order.userInfo.kycLevel] || `Level ${order.userInfo.kycLevel}`)
+                          : 'Tidak tersedia'
                     } />
                     {order.userFiatStatistics && (
                       <>

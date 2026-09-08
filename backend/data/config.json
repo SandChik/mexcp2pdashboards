@@ -1,12 +1,4 @@
 {
-  "appPassword": "$2a$10$M9DQ3TeNcIJwK8Why3pKquNn6ZLox.a0AZLbriM/aYoZIpu3Ih15i",
-  "merchants": [
-    {
-      "id": "1788864627990",
-      "name": "BX1",
-      "apiKey": "k1",
-      "platform": "bingx",
-      "apiSecret": "enc:v1:bjo+C4vw1yIjoL17:AVp+Jq24cxA1UdoauVOT2A==:ev4="
-    }
-  ]
+  "appPassword": "$2a$10$defaultHashedPasswordChangeMe",
+  "merchants": []
 }

@@ -72,10 +72,12 @@ Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
 
 - **Dashboard MEXC** (`/`) — tidak berubah.
 - **Dashboard BingX** (`/bingx`) — panel per merchant: order (aksi Release /
-  Konfirmasi langsung dari baris) + iklan (baca saja).
+  Konfirmasi langsung dari baris) + iklan: ubah harga cepat, tayang/turunkan,
+  Jeda semua (menu ⋮), edit & buat iklan (v62).
 - **Antrian** (`/queue`) — order kedua platform dalam satu daftar, tiap baris
-  berlabel MEXC / BingX.
-- Yang **belum** ada untuk BingX: chat di dashboard, auto-reply, kelola iklan,
+  berlabel MEXC / BingX. Daftar merchant dibaca ulang tiap menit dan segera
+  setelah Settings berubah (v62).
+- Yang **belum** ada untuk BingX: chat di dashboard, auto-reply,
   Catatan Buyer / FTD / UU. Worker auto-reply & capture sengaja melewati
   merchant BingX sampai jalurnya ada.
 

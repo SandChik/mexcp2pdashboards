@@ -151,6 +151,7 @@ function normalizeDetail(d, merchant) {
     confirmPaymentInfo: weSell ? null : (methods[0] || null),
     hidePaymentInfo: d.hidePaymentInfo,
     _bingx: { ...base._bingx, hidePaymentInfo: d.hidePaymentInfo },
+    _raw: d, // untouched BingX payload — shown by the modal's "Raw API data"
   };
 }
 

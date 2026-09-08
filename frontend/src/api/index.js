@@ -36,7 +36,11 @@ export const adsApi = {
   list: (mid, params) => api.get(`/ads/${mid}`, { params }),
   market: (mid, params) => api.get(`/ads/${mid}/market`, { params }),
   saveOrUpdate: (mid, data) => api.post(`/ads/${mid}`, data),
-  toggleStatus: (mid, adData, newStatus) => api.post(`/ads/${mid}/toggle-status`, { ...adData, advStatus: newStatus })
+  toggleStatus: (mid, adData, newStatus) => api.post(`/ads/${mid}/toggle-status`, { ...adData, advStatus: newStatus }),
+  // BingX only
+  setPrice: (mid, data) => api.post(`/ads/${mid}/price`, data),
+  config: (mid, params) => api.get(`/ads/${mid}/config`, { params }),
+  paymentMethods: (mid) => api.get(`/ads/${mid}/payment-methods`)
 };
 
 export const ordersApi = {

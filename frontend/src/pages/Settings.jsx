@@ -6,6 +6,7 @@ import SoundSettings from '../components/SoundSettings';
 import VersionInfo from '../components/VersionInfo';
 import { Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Key, Activity, CheckCircle2, XCircle } from 'lucide-react';
 import { PlatformBadge, PLATFORMS } from '../components/helpers';
+import { invalidateQueueMerchants, refreshQueue } from '../actionQueue';
 
 // Per-platform caps — mirrored from backend/routes/merchants.js.
 const PLATFORM_MAX = { mexc: 5, bingx: 2 };
@@ -226,7 +227,7 @@ export default function Settings() {
     try {
       await merchantApi.delete(id);
       toast.success('Merchant removed');
-      load();
+      load(); invalidateQueueMerchants(); refreshQueue();
     } catch { toast.error('Failed to remove'); }
   }
 
@@ -256,7 +257,7 @@ export default function Settings() {
             {showForm && (
               <div className="mb-3">
                 <MerchantForm
-                  onSave={() => { setShowForm(false); load(); }}
+                  onSave={() => { setShowForm(false); load(); invalidateQueueMerchants(); refreshQueue(); }}
                   onCancel={() => setShowForm(false)}
                 />
               </div>
@@ -283,7 +284,7 @@ export default function Settings() {
                     <MerchantForm
                       key={m.id}
                       existing={m}
-                      onSave={() => { setEditingId(null); load(); }}
+                      onSave={() => { setEditingId(null); load(); invalidateQueueMerchants(); refreshQueue(); }}
                       onCancel={() => setEditingId(null)}
                     />
                   ) : (

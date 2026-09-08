@@ -330,7 +330,7 @@ export default function ActionQueue() {
                     <Field label="Jumlah" value={`${formatAmount(o.tradableQuantity, 2)} USDT`} mono />
                     <Field label="Harga/USDT" value={d ? `${formatAmount(d.price, 0)} ${o.fiatUnit}` : null} mono />
                     <Field label="Dibuat" value={formatTime(o.createTime)} mono />
-                    <Field label="KYC" value={d ? (platformOf(o) === 'bingx' ? '—' : (KYC[d.userInfo?.kycLevel] || `Level ${d.userInfo?.kycLevel ?? '?'}`)) : null} />
+                    <Field label="KYC" value={d ? (platformOf(o) === 'bingx' ? (d.userInfo?.realName ? 'Terverifikasi' : '—') : (KYC[d.userInfo?.kycLevel] || `Level ${d.userInfo?.kycLevel ?? '?'}`)) : null} />
                   </div>
 
                   <button onClick={() => setDetailOrder(o)}

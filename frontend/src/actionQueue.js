@@ -38,6 +38,8 @@ const prevStates = {};        // merchantId -> { advOrderNo: state }
 const prevUnread = {};        // merchantId -> { advOrderNo: unreadCount }
 const seededMerchants = new Set();   // merchantId -> count of orders still running (state 0..3)
 let merchants = [];
+let merchantsAt = 0;           // when the merchant list was last fetched
+const MERCHANTS_TTL_MS = 60000; // re-read it every minute — a merchant added in Settings must show up
 let listeners = [];
 let timer = null;
 let inFlight = false;
@@ -60,13 +62,21 @@ export function getNameIndex() { return nameIndex; }
 /** Is the duplicate-name alert switched on for this merchant? */
 export function isBuyerLogOn(mid) { return !!buyerLogOn[mid]; }
 
+/** Settings calls this after adding/editing/removing a merchant, so the next
+ *  poll picks the change up immediately instead of on the minute. */
+export function invalidateQueueMerchants() { merchantsAt = 0; }
+
 export async function refreshQueue() {
   if (inFlight) return;
   inFlight = true;
   try {
-    if (merchants.length === 0) {
+    // The list used to be fetched ONCE per tab. A BingX merchant added in
+    // Settings therefore never got polled until a full page reload — its
+    // orders showed in the panel but never in the queue.
+    if (merchants.length === 0 || Date.now() - merchantsAt > MERCHANTS_TTL_MS) {
       const r = await merchantApi.list();
       merchants = r.data || [];
+      merchantsAt = Date.now();
       // Which merchants have "Catat buyer & alert nama" ON. The duplicate badge
       // and its sound are gated on this, per merchant.
       await Promise.all(merchants.map(async m => {
