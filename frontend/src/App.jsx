@@ -8,6 +8,7 @@ import UUReport from './pages/UUReport';
 import FTDReport from './pages/FTDReport';
 import BuyerLog from './pages/BuyerLog';
 import ActionQueue from './pages/ActionQueue';
+import BingxDashboard from './pages/BingxDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function ProtectedRoute({ children }) {
@@ -27,6 +28,7 @@ function AppRoutes() {
       <Route path="/ftd" element={<ProtectedRoute><FTDReport /></ProtectedRoute>} />
       <Route path="/buyers" element={<ProtectedRoute><BuyerLog /></ProtectedRoute>} />
       <Route path="/queue" element={<ProtectedRoute><ActionQueue /></ProtectedRoute>} />
+      <Route path="/bingx" element={<ProtectedRoute><BingxDashboard /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </ErrorBoundary>

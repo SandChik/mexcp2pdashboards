@@ -173,6 +173,7 @@ export const SOUND_EVENTS = [
 const STATE_SOUND = {
   0: 'unpaid', 1: 'paid', 2: 'waiting', 3: 'processing',
   4: 'done', 5: 'cancelled', 6: 'invalid', 7: 'refused', 8: 'timeout',
+  9: 'duplicate', // Banding (BingX appeal) — an alert, needs a human
 };
 export function soundForState(state) {
   return STATE_SOUND[state] || null;

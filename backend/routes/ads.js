@@ -6,6 +6,7 @@ const { mexcGet, mexcPost } = require('../utils/mexcApi');
 
 const { getMerchant } = require('../utils/store');
 const { audit } = require('../utils/audit');
+const bx = require('../utils/bingxOrders');
 const router = express.Router();
 
 const KYC_INT_TO_STR = { 0: 'NONE', 1: 'PRIMARY', 2: 'ADVANCED' };
@@ -53,6 +54,10 @@ async function fetchAllAds(params, apiKey, apiSecret) {
 router.get('/:merchantId', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (bx.isBingx(merchant)) {
+    try { return res.json({ code: 0, data: await bx.listAds(merchant) }); }
+    catch (err) { return res.status(500).json({ code: -1, error: err.message }); }
+  }
   try {
     const all = await fetchAllAds({}, merchant.apiKey, merchant.apiSecret);
     res.json({ code: 0, msg: 'success', data: all });
@@ -63,6 +68,10 @@ router.get('/:merchantId', authMiddleware, async (req, res) => {
 router.get('/:merchantId/market', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (bx.isBingx(merchant)) {
+    try { return res.json({ code: 0, data: await bx.marketAds(merchant, req.query) }); }
+    catch (err) { return res.status(500).json({ code: -1, error: err.message }); }
+  }
   try {
     const { fiatUnit, coinId, side, page = 1 } = req.query;
     const result = await mexcGet('/api/v3/fiat/market/ads/pagination',
@@ -75,6 +84,7 @@ router.get('/:merchantId/market', authMiddleware, async (req, res) => {
 router.post('/:merchantId', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (bx.isBingx(merchant)) return res.status(501).json({ code: -1, msg: 'Kelola iklan BingX hadir di irisan berikutnya' });
   try {
     const result = await mexcPost('/api/v3/fiat/merchant/ads/save_or_update',
       req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
@@ -90,6 +100,7 @@ router.post('/:merchantId', authMiddleware, async (req, res) => {
 router.post('/:merchantId/toggle-status', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (bx.isBingx(merchant)) return res.status(501).json({ code: -1, msg: 'Kelola iklan BingX hadir di irisan berikutnya' });
 
   try {
     const b = req.body;

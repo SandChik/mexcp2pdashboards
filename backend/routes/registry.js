@@ -26,6 +26,7 @@ const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' '
 router.post('/:mid/capture', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.mid);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (merchant.platform === 'bingx') return res.json({ added: 0, fetched: 0, skipped: 'bingx' }); // buyer log for BingX: later slice
   const orders = Array.isArray(req.body.orders) ? req.body.orders : [];
   const { added, fetched } = await captureBuyerLog(merchant, orders);
   if (added) audit({ action: 'buyer_log_capture', merchantId: merchant.id, merchantName: merchant.name, added });

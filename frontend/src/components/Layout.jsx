@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Users, UserPlus, BookUser, Settings, LogOut, Zap } from 'lucide-react';
+import { LayoutDashboard, Users, UserPlus, BookUser, Settings, LogOut, Zap, Hexagon } from 'lucide-react';
 import { subscribeQueue, getActionableCount } from '../actionQueue';
 
 const NAV = [
-  { to: '/',         icon: LayoutDashboard, label: 'Dashboard', short: 'Home'   },
+  { to: '/',         icon: LayoutDashboard, label: 'Dashboard MEXC', short: 'MEXC' },
+  { to: '/bingx',    icon: Hexagon,         label: 'Dashboard BingX', short: 'BingX' },
   { to: '/queue',    icon: Zap,             label: 'Antrian',   short: 'Antrian', badge: true },
   { to: '/uu',       icon: Users,           label: 'Unique Users', short: 'UU'  },
   { to: '/ftd',      icon: UserPlus,        label: 'FTD',       short: 'FTD'    },

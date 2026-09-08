@@ -3,6 +3,7 @@ const { authMiddleware } = require('../middleware/authMiddleware');
 const { mexcGet, mexcPost } = require('../utils/mexcApi');
 const { readConfig, writeConfig, getMerchant, encryptSecret, decryptSecret } = require('../utils/store');
 const { audit } = require('../utils/audit');
+const bx = require('../utils/bingxOrders');
 const fs = require('fs');
 const path = require('path');
 
@@ -34,13 +35,19 @@ const DEFAULT_SETTINGS = { buyerLog: false, autoReplyEnabled: true, autoReplyRul
 
 const router = express.Router();
 
+// Platforms. Merchants saved before v60 have no `platform` field → MEXC.
+// Caps are per platform: the MEXC dashboard shows at most 3 panels and was
+// designed for 5 accounts; BingX is a separate page with its own limit.
+const PLATFORMS = { mexc: { label: 'MEXC', max: 5 }, bingx: { label: 'BingX', max: 2 } };
+const platformOf = m => (m && PLATFORMS[m.platform] ? m.platform : 'mexc');
+
 // GET /api/merchants — list (secret never leaves the server in the clear)
 router.get('/', authMiddleware, (req, res) => {
   const config = readConfig();
   const safe = config.merchants.map(m => {
     const plain = decryptSecret(m.apiSecret);
     return {
-      id: m.id, name: m.name, apiKey: m.apiKey,
+      id: m.id, name: m.name, apiKey: m.apiKey, platform: platformOf(m),
       apiSecret: plain ? '••••••••' + plain.slice(-4) : '',
       apiSecretSet: !!m.apiSecret,
     };
@@ -52,14 +59,18 @@ router.get('/', authMiddleware, (req, res) => {
 router.post('/', authMiddleware, (req, res) => {
   const { name, apiKey, apiSecret } = req.body;
   if (!name || !apiKey || !apiSecret) return res.status(400).json({ error: 'name, apiKey, apiSecret required' });
+  const platform = PLATFORMS[req.body.platform] ? req.body.platform : 'mexc';
 
   const config = readConfig();
-  if (config.merchants.length >= 5) return res.status(400).json({ error: 'Maximum 5 merchants allowed' });
+  const onPlatform = config.merchants.filter(m => platformOf(m) === platform).length;
+  if (onPlatform >= PLATFORMS[platform].max) {
+    return res.status(400).json({ error: `Maksimal ${PLATFORMS[platform].max} merchant ${PLATFORMS[platform].label}` });
+  }
 
-  const merchant = { id: Date.now().toString(), name, apiKey, apiSecret: encryptSecret(apiSecret) };
+  const merchant = { id: Date.now().toString(), name, apiKey, platform, apiSecret: encryptSecret(apiSecret) };
   config.merchants.push(merchant);
   writeConfig(config);
-  res.json({ success: true, merchant: { id: merchant.id, name, apiKey } });
+  res.json({ success: true, merchant: { id: merchant.id, name, apiKey, platform } });
 });
 
 // PUT /api/merchants/:id — update
@@ -91,6 +102,7 @@ router.delete('/:id', authMiddleware, (req, res) => {
 router.post('/:id/service-switch', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.id);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (bx.isBingx(merchant)) return res.status(501).json({ error: 'BingX tidak punya saklar merchant; delist iklan satu per satu (irisan iklan)' });
   try {
     const result = await mexcPost('/api/v3/fiat/merchant/service/switch',
       { open: req.body.open }, merchant.apiKey, merchant.apiSecret, { priority: true });
@@ -103,6 +115,7 @@ router.post('/:id/service-switch', authMiddleware, async (req, res) => {
 router.get('/:id/balance', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.id);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (bx.isBingx(merchant)) return res.json({ free: null, locked: null, unsupported: true }); // not in the P2P API set
   try {
     const result = await mexcGet('/api/v3/account', {}, merchant.apiKey, merchant.apiSecret, { priority: true });
     const usdt = (result.balances || []).find(b => b.asset === 'USDT');
@@ -126,6 +139,19 @@ router.post('/:id/pause-state', authMiddleware, (req, res) => {
   writePause(all);
   audit({ action: req.body.paused ? 'trading_pause' : 'trading_resume', merchantId: req.params.id, adCount: (req.body.ads || []).length });
   res.json({ success: true });
+});
+
+// POST /api/merchants/:id/bingx-test — the probe, from inside the dashboard.
+// Read-only unless body.post === true (then one no-op price rewrite on the
+// first ad, to confirm the POST body format). Only for BingX merchants.
+router.post('/:id/bingx-test', authMiddleware, async (req, res) => {
+  const merchant = getMerchant(req.params.id);
+  if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (!bx.isBingx(merchant)) return res.status(400).json({ error: 'Bukan merchant BingX' });
+  const post = req.body?.post === true;
+  const report = await bx.connectionTest(merchant, { post });
+  audit({ action: 'bingx_connection_test', merchantId: merchant.id, merchantName: merchant.name, ok: report.ok, post, postOk: report.post?.ok ?? null });
+  res.json(report);
 });
 
 // GET /api/merchants/:id/settings — per-merchant dashboard settings

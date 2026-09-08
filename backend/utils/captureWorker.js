@@ -33,7 +33,9 @@ async function cycle() {
   running = true;
   try {
     const { fetchRecentOrders } = require('./captureCore');
-    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(Boolean);
+    // BingX merchants are skipped here until FTD/buyer-log get their BingX path:
+    // this loop talks to MEXC endpoints and would just log errors for them.
+    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(m => m && m.platform !== 'bingx');
     if (merchants.length === 0) return;
     const settings = readSettings();
 

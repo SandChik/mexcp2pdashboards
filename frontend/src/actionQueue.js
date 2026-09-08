@@ -23,7 +23,7 @@ import { actionFor } from './actions';
 
 const POLL_MS = 15000;
 const WINDOW_MS = 86400000; // 24h — running orders are minutes old, never days
-const RUNNING = [0, 1, 2, 3];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING
+const RUNNING = [0, 1, 2, 3, 9];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING, + BANDING (BingX appeal)
                                // 4..8 (DONE/CANCEL/INVALID/REFUSE/TIMEOUT) are
                                // finished and deliberately excluded — this is a
                                // work list, not a history page.
@@ -95,7 +95,7 @@ export async function refreshQueue() {
         const r = await ordersApi.marketQuick(m.id, { startTime: now - WINDOW_MS, endTime: now });
         const raw = r.data;
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-        const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name }));
+        const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name, platform: m.platform || o.platform || 'mexc' }));
         // Announce over every order in the window, not just the running ones —
         // otherwise a transition INTO done/cancelled/timeout would be silent,
         // because those orders leave the running list at the same moment.

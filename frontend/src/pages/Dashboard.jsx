@@ -88,7 +88,9 @@ export default function Dashboard() {
   }, [alert]);
 
   const load = useCallback(async () => {
-    try { const r = await merchantApi.list(); setMerchants(r.data); }
+    // This page is the MEXC dashboard. BingX merchants have their own page
+    // (/bingx); a MerchantPanel would call MEXC endpoints with a BingX key.
+    try { const r = await merchantApi.list(); setMerchants((r.data || []).filter(m => (m.platform || 'mexc') === 'mexc')); }
     catch { /* interceptor handles 401 */ }
     finally { setLoading(false); }
   }, []);
@@ -288,7 +290,7 @@ export default function Dashboard() {
               <Plus size={22} className="text-brand-300" />
             </div>
             <p className="text-surface-50 font-medium">Belum ada merchant</p>
-            <p className="text-sm text-surface-300 max-w-xs">Tambahkan akun merchant MEXC (API key & secret) untuk mulai memantau order.</p>
+            <p className="text-sm text-surface-300 max-w-xs">Tambahkan akun merchant MEXC (API key & secret) untuk mulai memantau order. Akun BingX punya halaman sendiri di menu.</p>
             <button onClick={() => navigate('/settings')} className="btn-primary mt-1">Buka Settings</button>
           </div>
         ) : (

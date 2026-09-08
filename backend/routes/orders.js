@@ -7,6 +7,9 @@ const { mexcGet, mexcPost } = require('../utils/mexcApi');
 const { getMerchant } = require('../utils/store');
 const { audit } = require('../utils/audit');
 const { captureFtdByOrderNos } = require('../utils/captureCore');
+// BingX merchants take a different road inside the same routes: the URLs the
+// browser calls stay identical, only the upstream and the translator differ.
+const bx = require('../utils/bingxOrders');
 const router = express.Router();
 
 const UU_CACHE = path.join(__dirname, '../data/uu-cache.json');
@@ -25,6 +28,7 @@ function normState(s) {
   return map[String(s).toUpperCase()] ?? -1;
 }
 const TERMINAL = new Set([4, 5, 6, 7, 8]); // done/cancel/invalid/refuse/timeout
+const TERMINAL_BINGX = new Set([4, 5, 6, 7, 8, 9]); // + 9 = appeal: never release while a dispute is open
 
 // Single window fetch — MEXC max 20 pages × 10 = 200 per window
 async function fetchWindow(endpoint, params, apiKey, apiSecret, maxPages = 20) {
@@ -79,11 +83,19 @@ const quickCache = new Map(); // merchantId|endpoint -> { at, promise }
 const QUICK_TTL_MS = 3000;
 
 function getOrdersCached(endpoint, params, merchant, isQuick) {
-  if (!isQuick) return getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, false);
+  // BingX: same cache, same contract, different fetcher (already house-shaped).
+  const fetchQuick = bx.isBingx(merchant)
+    ? () => bx.fetchQuick(merchant)
+    : () => getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, true);
+  if (!isQuick) {
+    return bx.isBingx(merchant)
+      ? bx.fetchRange(merchant, params.startTime, params.endTime)
+      : getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, false);
+  }
   const key = `${merchant.id}|${endpoint}`;
   const hit = quickCache.get(key);
   if (hit && Date.now() - hit.at < QUICK_TTL_MS) return hit.promise;
-  const promise = getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, true)
+  const promise = fetchQuick()
     .catch(err => { quickCache.delete(key); throw err; }); // never cache failures
   quickCache.set(key, { at: Date.now(), promise });
   return promise;
@@ -146,6 +158,10 @@ router.get('/:merchantId', authMiddleware, async (req, res) => {
 router.get('/:merchantId/detail/:advOrderNo', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
+  if (bx.isBingx(merchant)) {
+    try { return res.json({ code: 0, data: await bx.getDetail(merchant, req.params.advOrderNo) }); }
+    catch (err) { return res.status(500).json({ code: err.bingx?.code ?? -1, error: err.message, msg: err.message }); }
+  }
   try {
     const r = await mexcGet('/api/v3/fiat/order/detail',
       { advOrderNo: req.params.advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
@@ -156,6 +172,17 @@ router.get('/:merchantId/detail/:advOrderNo', authMiddleware, async (req, res) =
 router.post('/:merchantId/confirm-paid', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
+  if (bx.isBingx(merchant)) {
+    // BingX: action 3 on a BUY order = "I have paid". No payment id needed.
+    try {
+      const r = await bx.modifyStatus(merchant, req.body.advOrderNo, 3);
+      audit({ action: 'confirm_paid', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advOrderNo: req.body.advOrderNo, code: r?.code, msg: r?.msg });
+      return res.json(r);
+    } catch (err) {
+      const d = err.response?.data || err.bingx;
+      return res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message });
+    }
+  }
   try {
     const r = await mexcPost('/api/v3/fiat/confirm_paid',
       { advOrderNo: req.body.advOrderNo, userConfirmPaymentId: req.body.userConfirmPaymentId },
@@ -173,6 +200,35 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   const { advOrderNo } = req.body;
   if (!advOrderNo) return res.status(400).json({ code: -1, msg: 'advOrderNo required' });
+  if (bx.isBingx(merchant)) {
+    // BingX release = modifyStatus action 3 on a SELL order ("fiat received").
+    // Same guard as MEXC: re-read the order and refuse anything terminal —
+    // plus an open appeal, because releasing mid-dispute is exactly the
+    // scenario the dispute exists to prevent.
+    try {
+      let blocked = null;
+      try {
+        const detail = await bx.getDetail(merchant, advOrderNo);
+        if (TERMINAL_BINGX.has(detail.state)) {
+          const names = { 4: 'already completed', 5: 'cancelled', 8: 'timed out', 9: 'in appeal (banding)' };
+          blocked = names[detail.state] || ('in state ' + detail.state);
+        } else if (detail._ourSide !== 'SELL') {
+          blocked = 'a BUY order — nothing to release';
+        }
+      } catch { /* detail failed — don't block on that */ }
+      if (blocked) {
+        audit({ action: 'release_coin_blocked', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, reason: blocked });
+        return res.status(409).json({ code: -1, msg: `Can't release: order is ${blocked}.` });
+      }
+      const r = await bx.modifyStatus(merchant, advOrderNo, 3);
+      audit({ action: 'release_coin', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, code: r?.code, msg: r?.msg });
+      return res.json(r);
+    } catch (err) {
+      const d = err.response?.data || err.bingx;
+      audit({ action: 'release_coin_error', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, msg: d?.msg || err.message });
+      return res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message });
+    }
+  }
   try {
     // Safety guard: releasing crypto is irreversible. Block only states that are
     // clearly terminal (already done / cancelled / etc). Anything else — including
@@ -206,6 +262,7 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
 router.post('/:merchantId/create', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
+  if (bx.isBingx(merchant)) return res.status(501).json({ code: -1, msg: 'Buat order BingX belum didukung' });
   try {
     const r = await mexcPost('/api/v3/fiat/merchant/order/deal', req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
     res.json(r);
@@ -219,6 +276,11 @@ router.post('/:merchantId/member-ids', authMiddleware, async (req, res) => {
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   const advOrderNos = Array.isArray(req.body.advOrderNos) ? req.body.advOrderNos : [];
   const cache = readUuCache();
+  if (bx.isBingx(merchant)) {
+    const out = await bx.resolveMembers(merchant, advOrderNos, cache);
+    writeUuCache(cache);
+    return res.json(out);
+  }
   const map = {};
   let fetched = 0, fromCache = 0, capped = false;
   const MAX_FETCH = 600; // bound per-call work; cache makes later calls instant
@@ -243,6 +305,7 @@ router.post('/:merchantId/capture-stats', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   const nos = Array.isArray(req.body.advOrderNos) ? req.body.advOrderNos : [];
+  if (bx.isBingx(merchant)) return res.json({ captured: 0, skipped: 'bingx' }); // FTD for BingX: later slice
   const { captured } = await captureFtdByOrderNos(merchant, nos);
   res.json({ captured });
 });

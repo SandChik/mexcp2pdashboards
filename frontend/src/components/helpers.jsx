@@ -8,7 +8,29 @@ export const BANK_MAP = {
 
 export function getBankName(payMethod) {
   const id = parseInt(payMethod);
+  // BingX names its methods ("BCA", "DANA") instead of numbering them — show
+  // the name as-is. MEXC always passes a numeric id, so nothing changes there.
+  if (isNaN(id) && payMethod) return String(payMethod);
   return BANK_MAP[id] || (payMethod ? `Method ${payMethod}` : '-');
+}
+
+// ─── Platforms ────────────────────────────────────────────────────────────────
+// Every merchant belongs to one platform. Orders carry `platform` so the
+// shared queue can label them; merchants saved before v60 are MEXC.
+export const PLATFORMS = {
+  mexc:  { label: 'MEXC',  chip: 'bg-brand-500/15 text-brand-300 ring-brand-500/30' },
+  bingx: { label: 'BingX', chip: 'bg-warning/15 text-warning ring-warning/30' },
+};
+export const platformOf = (x) => (x?.platform && PLATFORMS[x.platform] ? x.platform : 'mexc');
+
+export function PlatformBadge({ platform, className = '' }) {
+  const p = PLATFORMS[platform] || PLATFORMS.mexc;
+  return (
+    <span className={`inline-flex items-center text-[10px] font-bold tracking-wide uppercase rounded-md px-1.5 py-0.5 ring-1 ${p.chip} ${className}`}
+      title={`Platform: ${p.label}`}>
+      {p.label}
+    </span>
+  );
 }
 
 // Get label(s) from ad's paymentInfo array (preferred) or payMethod string
@@ -46,6 +68,9 @@ export const ORDER_STATES = {
   6: { label: 'Invalid',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
   7: { label: 'Ditolak',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
   8: { label: 'Timeout',     color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },
+  // 9 exists only for BingX (orderStatus 6 = appeal). It is still running —
+  // the money question is unresolved — but never actionable from here.
+  9: { label: 'Banding',     color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
 };
 
 export const KYC_LABELS = { 0: 'None', 1: 'Primary', 2: 'Advanced' };
@@ -57,7 +82,8 @@ export function normalizeState(s) {
   if (!isNaN(n)) return n;
   const map = {
     NOT_PAID: 0, PAID: 1, WAIT_PROCESS: 2, PROCESSING: 3,
-    DONE: 4, CANCEL: 5, CANCELLED: 5, INVALID: 6, REFUSE: 7, TIMEOUT: 8
+    DONE: 4, CANCEL: 5, CANCELLED: 5, INVALID: 6, REFUSE: 7, TIMEOUT: 8,
+    APPEAL: 9, BANDING: 9,
   };
   return map[String(s).toUpperCase()] ?? -1;
 }

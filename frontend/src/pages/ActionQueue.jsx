@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
 import OrderDetailModal from '../components/OrderDetailModal';
-import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge } from '../components/helpers';
+import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge, PlatformBadge, platformOf } from '../components/helpers';
 import { runAction, actionFor } from '../actions';
 import { getQueue, subscribeQueue, refreshQueue, applyActionLocally, getQueueMeta, getActionableCount, getNameIndex, isBuyerLogOn } from '../actionQueue';
 import { ordersApi } from '../api';
@@ -255,6 +255,9 @@ export default function ActionQueue() {
                   <div className="flex items-start gap-3 sm:gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        {/* Which exchange this order lives on — the one thing that
+                            must never be ambiguous when two platforms share a queue. */}
+                        <PlatformBadge platform={platformOf(o)} />
                         <span className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-md px-2 py-0.5 ring-1 ${tone.chip}`}
                           title={`Merchant: ${o.merchantName}`}>
                           <Store size={10} /> {o.merchantName}
@@ -308,7 +311,7 @@ export default function ActionQueue() {
                       // then explaining why nothing happened.
                       <div className="flex-shrink-0 flex items-center justify-center gap-1.5 text-xs text-surface-300 rounded-lg px-3 sm:px-4 h-11 min-w-[104px] sm:min-w-[132px] border border-dashed border-surface-700 text-center leading-tight">
                         <Hourglass size={13} className="flex-shrink-0" />
-                        {o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
+                        {o._state === 9 ? 'Banding — tangani di BingX' : o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
                       </div>
                     ) : (
                       <button onClick={() => act(o)} disabled={!!busy}
@@ -327,7 +330,7 @@ export default function ActionQueue() {
                     <Field label="Jumlah" value={`${formatAmount(o.tradableQuantity, 2)} USDT`} mono />
                     <Field label="Harga/USDT" value={d ? `${formatAmount(d.price, 0)} ${o.fiatUnit}` : null} mono />
                     <Field label="Dibuat" value={formatTime(o.createTime)} mono />
-                    <Field label="KYC" value={d ? (KYC[d.userInfo?.kycLevel] || `Level ${d.userInfo?.kycLevel ?? '?'}`) : null} />
+                    <Field label="KYC" value={d ? (platformOf(o) === 'bingx' ? '—' : (KYC[d.userInfo?.kycLevel] || `Level ${d.userInfo?.kycLevel ?? '?'}`)) : null} />
                   </div>
 
                   <button onClick={() => setDetailOrder(o)}
@@ -336,7 +339,9 @@ export default function ActionQueue() {
                         ? 'bg-sell/15 text-sell border-sell/40 hover:bg-sell/25'
                         : 'bg-surface-800 text-surface-100 border-surface-600 hover:bg-surface-700 hover:border-surface-500'}`}>
                     <MessageSquare size={13} />
-                    {o.unreadCount > 0 ? `Chat · ${o.unreadCount} pesan baru` : 'Buka chat'}
+                    {platformOf(o) === 'bingx'
+                      ? (o.unreadCount > 0 ? `Detail · ${o.unreadCount} pesan baru (chat di BingX)` : 'Detail order')
+                      : (o.unreadCount > 0 ? `Chat · ${o.unreadCount} pesan baru` : 'Buka chat')}
                   </button>
                 </div>
               </div>
@@ -348,7 +353,7 @@ export default function ActionQueue() {
 
       {detailOrder && (
         <OrderDetailModal merchantId={detailOrder.merchantId} advOrderNo={detailOrder.advOrderNo}
-          initialTab="chat"
+          initialTab={platformOf(detailOrder) === 'bingx' ? 'detail' : 'chat'}
           onClose={() => { setDetailOrder(null); refreshQueue(); }}
           onActionDone={() => refreshQueue()} />
       )}

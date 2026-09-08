@@ -83,7 +83,10 @@ async function cycle() {
   running = true;
   let sentThisCycle = 0;
   try {
-    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(Boolean);
+    // BingX has no WebSocket chat; its auto-reply path arrives in a later slice.
+    // Until then BingX merchants are skipped so this MEXC-only loop never runs
+    // against a BingX key.
+    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(m => m && m.platform !== 'bingx');
     if (merchants.length === 0) return;
     const settings = readSettingsSafe();
     const states = readJson(STATE_PATH);

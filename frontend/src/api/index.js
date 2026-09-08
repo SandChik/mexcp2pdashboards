@@ -28,7 +28,8 @@ export const merchantApi = {
   getPauseState: (id) => api.get(`/merchants/${id}/pause-state`),
   setPauseState: (id, paused, ads) => api.post(`/merchants/${id}/pause-state`, { paused, ads }),
   getSettings: (id) => api.get(`/merchants/${id}/settings`),
-  setSettings: (id, settings) => api.post(`/merchants/${id}/settings`, settings)
+  setSettings: (id, settings) => api.post(`/merchants/${id}/settings`, settings),
+  bingxTest: (id, post = false) => api.post(`/merchants/${id}/bingx-test`, { post })
 };
 
 export const adsApi = {

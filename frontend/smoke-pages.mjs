@@ -11,7 +11,7 @@ w.fetch = async () => ({ ok:true, json: async () => ({ version:'test' }) });
 const reply = (url) => {
   if (url.includes('/api/merchants') && url.endsWith('/settings')) return { buyerLog:true, autoReplyEnabled:true, quickReplies:[], autoReplyRules:[] };
   if (url.includes('/api/merchants/') && url.includes('/pause')) return { ads: [] };
-  if (url.includes('/api/merchants')) return [{ id:'m1', name:'Test Merchant' }];
+  if (url.includes('/api/merchants')) return [{ id:'m1', name:'Test Merchant', platform:'mexc' }, { id:'b1', name:'Test BingX', platform:'bingx' }];
   if (url.includes('/api/orders') && url.includes('member-ids')) return { map:{} };
   if (url.includes('/api/orders')) return { code:0, data:[] };
   if (url.includes('/api/ads')) return { code:0, data:[] };
@@ -38,7 +38,7 @@ w.console.error = (...a) => errs.push(a.map(x => (x&&x.stack)?x.stack:String(x))
 w.eval(fs.readFileSync('/tmp/app.iife.js','utf8'));
 await new Promise(r=>setTimeout(r,500));
 
-const routes = ['/', '/queue', '/uu', '/ftd', '/buyers', '/settings'];
+const routes = ['/', '/bingx', '/queue', '/uu', '/ftd', '/buyers', '/settings'];
 let bad = 0;
 for (const route of routes) {
   w.history.pushState({}, '', route);

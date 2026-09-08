@@ -64,6 +64,42 @@ mexc-dashboard/
 └── README.md
 ```
 
+## BingX P2P
+
+Sejak v61 dashboard mengenal dua platform. Tiap merchant punya `platform`
+(`mexc` untuk semua merchant lama, `bingx` untuk yang ditambah lewat
+Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
+
+- **Dashboard MEXC** (`/`) — tidak berubah.
+- **Dashboard BingX** (`/bingx`) — panel per merchant: order (aksi Release /
+  Konfirmasi langsung dari baris) + iklan (baca saja).
+- **Antrian** (`/queue`) — order kedua platform dalam satu daftar, tiap baris
+  berlabel MEXC / BingX.
+- Yang **belum** ada untuk BingX: chat di dashboard, auto-reply, kelola iklan,
+  Catatan Buyer / FTD / UU. Worker auto-reply & capture sengaja melewati
+  merchant BingX sampai jalurnya ada.
+
+Cara kerja di belakang: `backend/utils/bingxApi.js` (tanda tangan + parser
+aman angka 19 digit + gerbang 2 req/detik per merchant),
+`backend/utils/bingxAdapter.js` (penerjemah ke bentuk order MEXC yang sudah
+dipahami UI), `backend/utils/bingxOrders.js` (operasi). Route `/api/...`
+tetap sama — yang membelokkan adalah `merchant.platform`.
+
+Status order BingX → status dashboard: 1 → Belum bayar, 4 → Sudah bayar,
+5 → Selesai, 2 → Dibatalkan, 3 → Timeout, 6 → **Banding** (status baru,
+tidak pernah punya tombol aksi).
+
+Env opsional:
+- `BINGX_POST_MODE` = `json` (bawaan: semua parameter + timestamp + signature
+  di dalam body JSON, sesuai pedoman resmi BingX) | `query` | `form`. Uji lewat
+  Settings → merchant BingX → "+ uji POST (no-op)" atau
+  `npm run bingx:probe -- --post-noop`.
+
+Sebelum mengandalkan merchant BingX baru: Settings → **Tes koneksi**.
+Skrip pemeriksa mandiri: `backend/scripts/bingx-probe.js`
+(`BINGX_KEY=xxx BINGX_SECRET=yyy npm run bingx:probe` dari folder `backend`).
+Key & secret hanya lewat environment — jangan ditulis ke file di repo.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 
