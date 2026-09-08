@@ -21,7 +21,7 @@ import { actionFor } from './actions';
  * login screen.
  */
 
-const POLL_MS = 15000;
+const POLL_MS = 10000; // was 15s; the panels' 5s polls share the server cache, so this is nearly free
 const WINDOW_MS = 86400000; // 24h — running orders are minutes old, never days
 const RUNNING = [0, 1, 2, 3, 9];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING, + BANDING (BingX appeal)
                                // 4..8 (DONE/CANCEL/INVALID/REFUSE/TIMEOUT) are

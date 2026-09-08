@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ordersApi, adsApi, merchantApi } from '../api';
 import {
-  OrderStateBadge, SideBadge, AdStatusBadge, PlatformBadge, formatTime, formatAmount, formatCompact,
+  OrderStateBadge, SideBadge, AdStatusBadge, PlatformBadge, formatTime, formatAmount,
   ORDER_STATES, normalizeState,
 } from './helpers';
 import { playSound } from '../sounds';
@@ -49,6 +49,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
   const syncErrorRef = useRef(false);
   const [now, setNow]               = useState(Date.now());
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [openChatOrder, setOpenChatOrder] = useState(null); // open the modal straight on the chat tab
   const [tab, setTab]               = useState('orders');
   const [orderFilter, setOrderFilter] = useState('all');
   const [rowBusy, setRowBusy]       = useState(null);
@@ -163,7 +164,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
   useEffect(() => {
     if (!autoRefresh) return;
     const o = setInterval(() => doFetch(true, true), 5000);
-    const a = setInterval(() => fetchAds(), 60000);
+    const a = setInterval(() => fetchAds(), 30000); // same cadence as the MEXC panel
     return () => { clearInterval(o); clearInterval(a); };
   }, [doFetch, fetchAds, autoRefresh]);
 
@@ -291,7 +292,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
             <PlatformBadge platform="bingx" />
             {refreshing && <RefreshCw size={11} className="text-brand-400 animate-spin flex-shrink-0" />}
             {syncError && <span className="flex items-center gap-1 bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0"><WifiOff size={11} /> sync gagal</span>}
-            {unread > 0 && <span className="bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0" title="Balas lewat aplikasi BingX — chat di dashboard menyusul">{unread} belum dibaca</span>}
+            {unread > 0 && <span className="bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{unread} belum dibaca</span>}
             {pausedAds.length > 0 && <span className="bg-warning/15 text-warning text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{pausedAds.length} dijeda</span>}
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -326,8 +327,8 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
         <div className="grid grid-cols-3 gap-2 mt-3">
           {[
             ['Aktif', activeOrders.length, activeOrders.length > 0 ? 'text-brand-300' : 'text-surface-100'],
-            [`Jual (${fiatUnit})`, formatCompact(volSell), 'text-sell'],
-            ['USDT keluar', formatCompact(volSellUsdt), 'text-surface-100'],
+            [`Jual (${fiatUnit})`, formatAmount(volSell, 0), 'text-sell'],
+            ['USDT keluar', formatAmount(volSellUsdt, 2), 'text-surface-100'],
           ].map(([l, v, c]) => (
             <div key={l} className="bg-surface-900 rounded-lg px-2.5 py-2">
               <p className="text-[10px] uppercase tracking-wide text-surface-300 truncate">{l}</p>
@@ -387,10 +388,11 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
                         <SideBadge side={order.side} />
                         <OrderStateBadge state={order._state} />
                         {order.unreadCount > 0 && (
-                          <span title={`${order.unreadCount} pesan belum dibaca — balas di aplikasi BingX`}
-                            className="inline-flex items-center gap-0.5 text-[11px] font-semibold rounded-md px-1.5 py-0.5 bg-sell/15 text-sell">
+                          <button onClick={e => { e.stopPropagation(); setOpenChatOrder(order.advOrderNo); }}
+                            title={`${order.unreadCount} pesan belum dibaca — buka chat`}
+                            className="inline-flex items-center gap-0.5 text-[11px] font-semibold rounded-md px-1.5 py-0.5 bg-sell/15 text-sell hover:bg-sell/25 transition-colors">
                             <MessageSquare size={10} />{order.unreadCount}
-                          </span>
+                          </button>
                         )}
                         {countdown && (
                           <span className={`flex items-center gap-0.5 text-[11px] font-mono tnum rounded-md px-1.5 py-0.5 ${urgent ? 'bg-sell/15 text-sell animate-pulse-ring' : 'bg-warning/10 text-warning'}`}>
@@ -483,7 +485,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
                   </div>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-surface-300">
                     <span>Sisa: <b className="text-surface-100 font-mono">{formatAmount(ad.availableAmount, 2)}</b> / {formatAmount(ad.totalNumber, 2)} USDT</span>
-                    <span>Limit: <b className="text-surface-100 font-mono">{formatCompact(ad.minAmount)} – {formatCompact(ad.maxAmount)}</b></span>
+                    <span className="col-span-2">Limit: <b className="text-surface-100 font-mono">{formatAmount(ad.minAmount, 0)} – {formatAmount(ad.maxAmount, 0)} {ad.fiatUnit}</b></span>
                     <span className="col-span-2 truncate">Bayar: <b className="text-surface-100">{ad.payMethodNames?.length ? ad.payMethodNames.join(' · ') : '-'}</b>{ad.hidePaymentInfo === 1 ? ' · info bayar disembunyikan' : ''}</span>
                   </div>
                   <div className="flex items-center gap-1.5 mt-2.5">
@@ -506,7 +508,12 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
 
       {selectedOrder && (
         <OrderDetailModal merchantId={merchant.id} advOrderNo={selectedOrder} initialTab="detail"
-          onClose={() => setSelectedOrder(null)}
+          onClose={() => { setSelectedOrder(null); doFetch(true, true); }}
+          onActionDone={() => doFetch(false, true)} />
+      )}
+      {openChatOrder && (
+        <OrderDetailModal merchantId={merchant.id} advOrderNo={openChatOrder} initialTab="chat"
+          onClose={() => { setOpenChatOrder(null); doFetch(true, true); }}
           onActionDone={() => doFetch(false, true)} />
       )}
       {showAdModal && (

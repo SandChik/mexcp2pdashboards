@@ -16,7 +16,9 @@ const A = require('./bingxAdapter');
 
 const STATUS_TO_BINGX = { OPEN: 0, LIST: 0, CLOSE: 1, DELIST: 1, DELETE: 2 };
 const PAY_TIME = { 15: 1, 30: 2, 45: 3, 60: 4 };
-const MAX_METHODS = { SELL: 3, BUY: 5 };
+// The PDF says sell ads ≤3, buy ads ≤5. The live BingX UI allows 5 on sell ads
+// (verified by the operator, 8 Sep 2026) — the exchange is the authority.
+const MAX_METHODS = { SELL: 5, BUY: 5 };
 const CONDITIONS = new Set(['registryCountryCode', 'registryDays', 'latestSuccessOrderCount', 'latestSuccessAppealCount', 'isBindPhone', 'isTradeSpotOrStdContract']);
 
 function okData(res) {

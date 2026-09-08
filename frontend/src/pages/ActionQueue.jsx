@@ -339,9 +339,7 @@ export default function ActionQueue() {
                         ? 'bg-sell/15 text-sell border-sell/40 hover:bg-sell/25'
                         : 'bg-surface-800 text-surface-100 border-surface-600 hover:bg-surface-700 hover:border-surface-500'}`}>
                     <MessageSquare size={13} />
-                    {platformOf(o) === 'bingx'
-                      ? (o.unreadCount > 0 ? `Detail · ${o.unreadCount} pesan baru (chat di BingX)` : 'Detail order')
-                      : (o.unreadCount > 0 ? `Chat · ${o.unreadCount} pesan baru` : 'Buka chat')}
+                    {o.unreadCount > 0 ? `Chat · ${o.unreadCount} pesan baru` : 'Buka chat'}
                   </button>
                 </div>
               </div>
@@ -353,7 +351,7 @@ export default function ActionQueue() {
 
       {detailOrder && (
         <OrderDetailModal merchantId={detailOrder.merchantId} advOrderNo={detailOrder.advOrderNo}
-          initialTab={platformOf(detailOrder) === 'bingx' ? 'detail' : 'chat'}
+          initialTab="chat"
           onClose={() => { setDetailOrder(null); refreshQueue(); }}
           onActionDone={() => refreshQueue()} />
       )}

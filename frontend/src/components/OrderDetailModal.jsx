@@ -116,15 +116,14 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
   }, [merchantId, advOrderNo, conversationId, pollMessages]);
 
   const isBingx = order?.platform === 'bingx';
-  // BingX chat (REST polling, no WebSocket) arrives in a later slice. Until
-  // then the chat tab is not offered, and a stale 'chat' initialTab falls
-  // back to detail instead of calling MEXC chat endpoints with a BingX key.
-  useEffect(() => { if (isBingx && tab === 'chat') setTab('detail'); }, [isBingx, tab]);
+  // BingX chat has no WebSocket: the backend answers the same chat endpoints
+  // from BingX's REST IM API, and this modal's 3s history poll is the "live"
+  // channel. Nothing else here needs to know which platform it is on.
   useEffect(() => {
-    if (tab === 'chat' && !isBingx) { initChat(); }
+    if (tab === 'chat') { initChat(); }
     else { clearInterval(pollRef.current); }
     return () => clearInterval(pollRef.current);
-  }, [tab, isBingx]);
+  }, [tab]);
 
   async function sendMessage() {
     if (!msgInput.trim() || !conversationId || sending) return;
@@ -282,7 +281,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
 
         {/* Tabs */}
         <div className="flex border-b-2 border-surface-700 bg-surface-900">
-          {(isBingx ? ['detail'] : ['detail', 'chat']).map(t => (
+          {['detail', 'chat'].map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-5 py-2.5 text-sm font-mono capitalize transition-colors relative ${tab===t?'text-brand-400':'text-surface-200/40 hover:text-surface-200'}`}>
               {t === 'chat' && (
@@ -444,7 +443,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                       isBingx
                         // BingX never sends a level; a real name in the payload means
                         // the account passed KYC (P2P on BingX requires it).
-                        ? (order.userInfo.realName ? 'Terverifikasi (nama KYC dari BingX)' : 'Tidak tersedia dari API BingX')
+                        ? (order.userInfo.realName ? 'Terverifikasi' : '—')
                         : order.userInfo.kycLevel !== undefined && order.userInfo.kycLevel !== null
                           ? (KYC_LABELS[order.userInfo.kycLevel] || `Level ${order.userInfo.kycLevel}`)
                           : 'Tidak tersedia'

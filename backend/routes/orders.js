@@ -80,6 +80,9 @@ async function fetchChunked(endpoint, baseParams, apiKey, apiSecret, startTime, 
 // call and anything within 3s is served from memory. 3s is well under the
 // 5s poll interval, so freshness is unaffected.
 const quickCache = new Map(); // merchantId|endpoint -> { at, promise }
+// After a write (release / confirm) the panel refetches immediately; without
+// this it would be served the pre-action snapshot for up to QUICK_TTL_MS.
+function bustQuick(merchantId) { for (const k of quickCache.keys()) if (k.startsWith(merchantId + '|')) quickCache.delete(k); }
 const QUICK_TTL_MS = 3000;
 
 function getOrdersCached(endpoint, params, merchant, isQuick) {
@@ -176,6 +179,7 @@ router.post('/:merchantId/confirm-paid', authMiddleware, async (req, res) => {
     // BingX: action 3 on a BUY order = "I have paid". No payment id needed.
     try {
       const r = await bx.modifyStatus(merchant, req.body.advOrderNo, 3);
+      if (r?.code === 0) bustQuick(merchant.id);
       audit({ action: 'confirm_paid', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advOrderNo: req.body.advOrderNo, code: r?.code, msg: r?.msg });
       return res.json(r);
     } catch (err) {
@@ -187,6 +191,7 @@ router.post('/:merchantId/confirm-paid', authMiddleware, async (req, res) => {
     const r = await mexcPost('/api/v3/fiat/confirm_paid',
       { advOrderNo: req.body.advOrderNo, userConfirmPaymentId: req.body.userConfirmPaymentId },
       merchant.apiKey, merchant.apiSecret, { priority: true });
+    if (r?.code === 0) bustQuick(merchant.id);
     audit({ action: 'confirm_paid', merchantId: merchant.id, merchantName: merchant.name, advOrderNo: req.body.advOrderNo, code: r?.code, msg: r?.msg });
     res.json(r);
   } catch (err) {
@@ -221,6 +226,7 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
         return res.status(409).json({ code: -1, msg: `Can't release: order is ${blocked}.` });
       }
       const r = await bx.modifyStatus(merchant, advOrderNo, 3);
+      if (r?.code === 0) bustQuick(merchant.id);
       audit({ action: 'release_coin', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, code: r?.code, msg: r?.msg });
       return res.json(r);
     } catch (err) {
@@ -250,6 +256,7 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
     }
 
     const r = await mexcPost('/api/v3/fiat/release_coin', { advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
+    if (r?.code === 0) bustQuick(merchant.id);
     audit({ action: 'release_coin', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, code: r?.code, msg: r?.msg });
     res.json(r);
   } catch (err) {

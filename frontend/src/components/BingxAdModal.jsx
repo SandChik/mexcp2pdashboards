@@ -15,7 +15,7 @@ import toast from 'react-hot-toast';
  */
 
 const PAY_TIME = [[1, '15 menit'], [2, '30 menit'], [3, '45 menit'], [4, '60 menit']];
-const MAX_METHODS = { SELL: 3, BUY: 5 };
+const MAX_METHODS = { SELL: 5, BUY: 5 }; // live BingX allows 5 on sell ads too (PDF said 3)
 const CONDITION_FIELDS = [
   { key: 'registryDays',             label: 'Umur akun minimal (hari, 0–90)',              type: 'number', min: 0, max: 90 },
   { key: 'latestSuccessOrderCount',  label: 'Order sukses 60 hari terakhir minimal (0–10)', type: 'number', min: 0, max: 10 },
