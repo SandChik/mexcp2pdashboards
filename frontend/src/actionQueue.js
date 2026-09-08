@@ -21,7 +21,7 @@ import { actionFor } from './actions';
  * login screen.
  */
 
-const POLL_MS = 10000; // was 15s; the panels' 5s polls share the server cache, so this is nearly free
+const POLL_MS = 5000; // same cadence as the panels; they share the server's 3s cache, so this is nearly free
 const WINDOW_MS = 86400000; // 24h — running orders are minutes old, never days
 const RUNNING = [0, 1, 2, 3, 9];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING, + BANDING (BingX appeal)
                                // 4..8 (DONE/CANCEL/INVALID/REFUSE/TIMEOUT) are
@@ -43,8 +43,29 @@ const MERCHANTS_TTL_MS = 60000; // re-read it every minute — a merchant added 
 let listeners = [];
 let timer = null;
 let inFlight = false;
+let rerun = false;            // a refresh was requested while one was running → run again right after
 let lastError = false;
 let lastSync = 0;
+let announcing = false;       // true while THIS poller announces, so its own broadcast doesn't re-trigger it
+
+// Actions applied locally, with a timestamp. For a short grace period the
+// server snapshot is corrected against this: the exchange can still report a
+// just-released order as PAID for a second or two, and without this the very
+// next refresh put the row straight back until the poll after that.
+const recentLocal = new Map();  // advOrderNo -> { action, at }
+const LOCAL_GRACE_MS = 20000;
+function reconcile(list) {
+  const now = Date.now();
+  for (const [no, v] of recentLocal) if (now - v.at > LOCAL_GRACE_MS) recentLocal.delete(no);
+  if (recentLocal.size === 0) return list;
+  return list.flatMap(o => {
+    const r = recentLocal.get(o.advOrderNo);
+    if (!r) return [o];
+    if (r.action === 'release') return RUNNING.includes(o._state) ? [] : [o];           // server still says running → trust ourselves
+    if (r.action === 'confirm' && o._state === 0) return [{ ...o, state: 1, _state: 1 }]; // we paid; don't show "confirm" again
+    return [o];
+  });
+}
 
 const emit = () => listeners.forEach(fn => { try { fn(); } catch { /* */ } });
 
@@ -67,7 +88,7 @@ export function isBuyerLogOn(mid) { return !!buyerLogOn[mid]; }
 export function invalidateQueueMerchants() { merchantsAt = 0; }
 
 export async function refreshQueue() {
-  if (inFlight) return;
+  if (inFlight) { rerun = true; return; } // coalesce: one more pass after the current one
   inFlight = true;
   try {
     // The list used to be fetched ONCE per tab. A BingX merchant added in
@@ -110,6 +131,7 @@ export async function refreshQueue() {
         // otherwise a transition INTO done/cancelled/timeout would be silent,
         // because those orders leave the running list at the same moment.
         const seeded = seededMerchants.has(m.id);
+        announcing = true;
         const { states, unread } = announceOrderChanges({
           merchantId: m.id,
           merchantName: m.name,
@@ -120,8 +142,9 @@ export async function refreshQueue() {
         });
         prevStates[m.id] = states; prevUnread[m.id] = unread;
         seededMerchants.add(m.id);
+        announcing = false;
 
-        const running = norm.filter(o => RUNNING.includes(o._state));
+        const running = reconcile(norm.filter(o => RUNNING.includes(o._state)));
         return {
           mid: m.id,
           running,
@@ -154,7 +177,24 @@ export async function refreshQueue() {
     emit();
   } finally {
     inFlight = false;
+    announcing = false;
+    if (rerun) { rerun = false; refreshQueue(); }
   }
+}
+
+// ── Push, not just poll ──────────────────────────────────────────────────
+// Panels broadcast when they see a change; every successful action broadcasts
+// too. Both make the queue re-read at once (debounced so a burst of panel
+// events — three merchants polling at the same second — costs one refresh).
+let kick = null;
+function kickRefresh() { clearTimeout(kick); kick = setTimeout(refreshQueue, 250); }
+if (typeof window !== 'undefined') {
+  window.addEventListener('p2p:orders-changed', () => { if (!announcing) kickRefresh(); });
+  window.addEventListener('p2p:action-done', (e) => {
+    const { advOrderNo, kind } = e.detail || {};
+    if (advOrderNo) applyActionLocally(advOrderNo, kind);  // row gone / flipped NOW, from any screen
+    kickRefresh();
+  });
 }
 
 /**
@@ -169,6 +209,7 @@ export async function refreshQueue() {
  */
 export function applyActionLocally(advOrderNo, action) {
   const before = items;
+  recentLocal.set(advOrderNo, { action, at: Date.now() });
   if (action === 'confirm') {
     items = items.map(o => o.advOrderNo === advOrderNo ? { ...o, state: 1, _state: 1 } : o);
   } else {

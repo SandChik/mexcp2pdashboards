@@ -152,6 +152,9 @@ const P = {
   IM_SEND:            '/openApi/p2p/v1/im/sendMsg',
   IM_LIST:            '/openApi/p2p/v1/im/group/msgList',
   FILE_UPLOAD_URL:    '/openApi/p2p/v1/file/uploadUrl',
+  // Outside the P2P doc — from BingX's own api-ai-skills reference (fund-account):
+  FUND_BALANCE:       '/openApi/fund/v1/account/balance',
+  SPOT_BALANCE:       '/openApi/spot/v1/account/balance',
 };
 
 module.exports = { bingxGet, bingxPost, safeParse, canon, P, POST_MODE };

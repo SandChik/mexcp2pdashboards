@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, RefreshCw, Info } from 'lucide-react';
-import { adsApi } from '../api';
+import { adsApi, merchantApi } from '../api';
 import { formatAmount } from './helpers';
 import toast from 'react-hot-toast';
 
@@ -66,6 +66,8 @@ export default function BingxAdModal({ merchant, existingAd, onClose, onSaved })
   const [conds, setConds] = useState(() => condsFromAd(existingAd));
   const [myMethods, setMyMethods] = useState(null);   // merchant's accounts (null = loading)
   const [config, setConfig] = useState(null);         // assetConfig for this side
+  const [balance, setBalance] = useState(null);       // { free, locked, source } | { error }
+  const [showRawMethods, setShowRawMethods] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -81,6 +83,38 @@ export default function BingxAdModal({ merchant, existingAd, onClose, onSaved })
     adsApi.paymentMethods(merchant.id).then(r => setMyMethods(r.data?.data || [])).catch(() => setMyMethods([]));
   }, [merchant.id]);
 
+  // USDT balance (fund account) → the "Max" button, and the DEFAULT for the
+  // amount field: a new ad opens with the whole balance, an edited ad opens
+  // with "Sisa" = the whole balance. Both are still plain inputs — overwrite
+  // or clear them. Only fills a field the operator hasn't typed in yet.
+  useEffect(() => {
+    let alive = true;
+    merchantApi.balance(merchant.id).then(r => {
+      if (!alive) return;
+      const b = r.data || {};
+      setBalance(b);
+      const free = Number(b.free);
+      if (!(free > 0)) return;
+      const v = String(Math.floor(free * 100) / 100);
+      setForm(f => {
+        if (editing) return f.availableAmount === '' || f.availableAmount === undefined || String(f.availableAmount) === String(existingAd?.availableAmount ?? '') ? { ...f, availableAmount: v, totalNumber: Number(f.totalNumber) < free ? v : f.totalNumber } : f;
+        return f.totalNumber === '' ? { ...f, totalNumber: v } : f;
+      });
+    }).catch(e => alive && setBalance({ error: e.response?.data?.error || e.message }));
+    return () => { alive = false; };
+  }, [merchant.id]); // eslint-disable-line
+
+  const freeBal = balance && Number(balance.free) > 0 ? Math.floor(Number(balance.free) * 100) / 100 : null;
+  function useMax() {
+    if (freeBal === null) return;
+    const cap = config?.maxNumberPerAdvert ? Math.min(freeBal, Number(config.maxNumberPerAdvert)) : freeBal;
+    const v = String(cap);
+    setForm(f => editing ? { ...f, availableAmount: v, totalNumber: Number(f.totalNumber) < cap ? v : f.totalNumber } : { ...f, totalNumber: v });
+  }
+  const balanceHint = balance === null ? 'memuat saldo…'
+    : freeBal !== null ? `Saldo ${balance.source === 'spot' ? 'spot' : 'fund'}: ${formatAmount(balance.free, 2)} USDT${Number(balance.locked) > 0 ? ` (terkunci ${formatAmount(balance.locked, 2)})` : ''}`
+    : balance.error ? `Saldo tidak terbaca — ${balance.error}` : 'Saldo 0 atau tidak terbaca';
+
   useEffect(() => {
     setConfig(null);
     adsApi.config(merchant.id, { fiatUnit: fiat, tradeType: side === 'BUY' ? 1 : 2 })
@@ -91,8 +125,24 @@ export default function BingxAdModal({ merchant, existingAd, onClose, onSaved })
   const previewPrice = form.priceType === 2 && marketPrice && Number(form.floatRatio) > 0
     ? marketPrice * Number(form.floatRatio) / 100 : null;
 
+  // BingX rule (learned from a live rejection, code 100400 "There can only be
+  // one payment method of the same type"): per ad, at most ONE account per
+  // method type. Type = the platform method id; two accounts sharing it are
+  // mutually exclusive here so the rejection happens before the request.
+  const typeOf = (uid) => myMethods?.find(pm => pm.userPaymentMethodId === uid)?.methodId;
   function toggleMethod(id) {
-    setMethods(m => m.includes(id) ? m.filter(x => x !== id) : (m.length >= MAX_METHODS[side] ? (toast.error(`Maksimal ${MAX_METHODS[side]} metode untuk iklan ${side === 'SELL' ? 'jual' : 'beli'}`), m) : [...m, id]));
+    setMethods(m => {
+      if (m.includes(id)) return m.filter(x => x !== id);
+      if (m.length >= MAX_METHODS[side]) { toast.error(`Maksimal ${MAX_METHODS[side]} metode untuk iklan ${side === 'SELL' ? 'jual' : 'beli'}`); return m; }
+      const t = typeOf(id);
+      const clash = m.find(x => typeOf(x) === t);
+      if (t !== undefined && clash !== undefined) {
+        const cn = myMethods.find(pm => pm.userPaymentMethodId === clash)?.name;
+        toast.error(`BingX hanya mengizinkan satu rekening per jenis — "${cn}" sudah dipilih untuk jenis yang sama`);
+        return m;
+      }
+      return [...m, id];
+    });
   }
 
   function validate() {
@@ -144,6 +194,7 @@ export default function BingxAdModal({ merchant, existingAd, onClose, onSaved })
         minAmount: String(form.minAmount), maxAmount: String(form.maxAmount),
         paymentTimeLimit: Number(form.paymentTimeLimit),
         userPaymentMethods: methods,
+        _methodTypes: (myMethods || []).map(pm => ({ userPaymentMethodId: pm.userPaymentMethodId, methodId: pm.methodId })),
         hidePaymentInfo: side === 'SELL' ? form.hidePaymentInfo : undefined,
         termsDesc: form.termsDesc, autoReplyMsg: form.autoReplyMsg,
         userMatchConditions: Object.entries(conds)
@@ -210,12 +261,20 @@ export default function BingxAdModal({ merchant, existingAd, onClose, onSaved })
 
           {/* Stock + limits */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Total USDT iklan" hint={config ? `boleh ${formatAmount(config.minNumberPerAdvert, 2)}–${formatAmount(config.maxNumberPerAdvert, 2)} USDT` : undefined}>
-              <input value={form.totalNumber} onChange={e => set('totalNumber', e.target.value)} inputMode="decimal" className={input} placeholder="500" />
+            <Field label="Total USDT iklan" hint={`${balanceHint}${config ? ` · boleh ${formatAmount(config.minNumberPerAdvert, 2)}–${formatAmount(config.maxNumberPerAdvert, 2)} USDT` : ''}`}>
+              <div className="flex gap-1.5">
+                <input value={form.totalNumber} onChange={e => set('totalNumber', e.target.value)} inputMode="decimal" className={input} placeholder="500" />
+                {!editing && <button type="button" onClick={useMax} disabled={freeBal === null} title="Isi dengan seluruh saldo"
+                  className="flex-shrink-0 px-3 rounded-lg text-xs font-semibold border border-brand-500/40 text-brand-300 hover:bg-brand-500/10 disabled:opacity-40">Max</button>}
+              </div>
             </Field>
             {editing && (
-              <Field label="Sisa iklan (USDT)" hint="Kosongkan untuk tidak mengubah sisa.">
-                <input value={form.availableAmount} onChange={e => set('availableAmount', e.target.value)} inputMode="decimal" className={input} />
+              <Field label="Sisa iklan (USDT)" hint="Terisi otomatis dengan seluruh saldo. Kosongkan untuk tidak mengubah sisa.">
+                <div className="flex gap-1.5">
+                  <input value={form.availableAmount} onChange={e => set('availableAmount', e.target.value)} inputMode="decimal" className={input} />
+                  <button type="button" onClick={useMax} disabled={freeBal === null} title="Isi dengan seluruh saldo"
+                    className="flex-shrink-0 px-3 rounded-lg text-xs font-semibold border border-brand-500/40 text-brand-300 hover:bg-brand-500/10 disabled:opacity-40">Max</button>
+                </div>
               </Field>
             )}
             <Field label={`Limit minimum per order (${fiat})`} hint={config ? `min ${formatAmount(config.minAmountPerOrder, 0)}` : undefined}>
@@ -236,21 +295,27 @@ export default function BingxAdModal({ merchant, existingAd, onClose, onSaved })
           </Field>
 
           {/* Payment methods */}
-          <Field label={`Metode bayar (maks ${MAX_METHODS[side]})`} hint="Rekening diambil dari akun BingX Anda. Tambah rekening baru lewat aplikasi BingX.">
+          <Field label={`Metode bayar (maks ${MAX_METHODS[side]}, satu per jenis)`} hint="Rekening diambil dari akun BingX Anda. BingX menolak dua rekening dengan jenis yang sama di satu iklan. Tambah rekening baru lewat aplikasi BingX.">
             {myMethods === null ? <div className="skeleton h-10 w-full" />
               : myMethods.length === 0 ? <p className="text-xs text-sell">Belum ada rekening tersimpan di BingX.</p>
               : (
                 <div className="space-y-1.5">
                   {myMethods.map(pm => {
                     const on = methods.includes(pm.userPaymentMethodId);
+                    const blocked = !on && methods.some(x => typeOf(x) === pm.methodId);
                     return (
                       <button key={pm.userPaymentMethodId} type="button" onClick={() => toggleMethod(pm.userPaymentMethodId)}
-                        className={`w-full text-left rounded-lg px-3 py-2 border transition-colors ${on ? 'bg-brand-500/10 border-brand-500/40' : 'bg-surface-900 border-surface-700 hover:border-surface-600'}`}>
-                        <span className={`text-sm font-medium ${on ? 'text-brand-300' : 'text-surface-100'}`}>{pm.name}</span>
+                        title={blocked ? 'Jenis ini sudah dipilih — BingX hanya mengizinkan satu rekening per jenis' : undefined}
+                        className={`w-full text-left rounded-lg px-3 py-2 border transition-colors ${on ? 'bg-brand-500/10 border-brand-500/40' : blocked ? 'bg-surface-900 border-surface-700/50 opacity-45' : 'bg-surface-900 border-surface-700 hover:border-surface-600'}`}>
+                        <span className={`text-sm font-medium ${on ? 'text-brand-300' : 'text-surface-100'}`}>{pm.name}
+                          <span className="ml-2 text-[10px] font-mono text-surface-300">jenis #{pm.methodId}</span>
+                        </span>
                         <span className="block text-[11px] text-surface-300 font-mono truncate">{pm.account ? `${pm.account}${pm.payee ? ` · ${pm.payee}` : ''}` : pm.summary || '—'}</span>
                       </button>
                     );
                   })}
+                  <button type="button" onClick={() => setShowRawMethods(v => !v)} className="text-[11px] text-surface-300 hover:text-surface-50 border border-surface-700 rounded px-2 py-1">{showRawMethods ? 'Sembunyikan' : 'Data mentah rekening BingX'}</button>
+                  {showRawMethods && <pre className="bg-surface-950 border border-surface-700 rounded-lg p-3 text-[11px] text-surface-200 font-mono overflow-auto max-h-60 whitespace-pre-wrap break-all">{JSON.stringify(myMethods, null, 2)}</pre>}
                 </div>
               )}
           </Field>

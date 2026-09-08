@@ -73,12 +73,18 @@ Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
 - **Dashboard MEXC** (`/`) — tidak berubah.
 - **Dashboard BingX** (`/bingx`) — panel per merchant: order (aksi Release /
   Konfirmasi langsung dari baris) + iklan: ubah harga cepat, tayang/turunkan,
-  Jeda semua (menu ⋮), edit & buat iklan (v62) + chat per order (v63: BingX
+  Jeda semua (menu ⋮), edit & buat iklan (v62; v64: saldo fund account
+  ditampilkan di panel & form iklan, tombol Max, isian jumlah default = saldo,
+  satu rekening per jenis sesuai aturan BingX) + chat per order (v63: BingX
   tidak punya WebSocket, riwayat di-poll tiap 3 detik lewat `im/group/msgList`,
   kirim teks `im/sendMsg`, gambar lewat presigned PUT `file/uploadUrl`).
 - **Antrian** (`/queue`) — order kedua platform dalam satu daftar, tiap baris
   berlabel MEXC / BingX. Daftar merchant dibaca ulang tiap menit dan segera
-  setelah Settings berubah (v62).
+  setelah Settings berubah (v62). v65: poll 5 detik (sama dengan panel), dan
+  bukan cuma poll — tiap perubahan yang dilihat panel serta tiap aksi yang
+  berhasil (dari panel, modal, atau Antrian) langsung mendorong Antrian
+  memperbarui diri; aksi juga diterapkan lokal seketika dan dilindungi 20 detik
+  dari snapshot bursa yang masih ketinggalan.
 - Yang **belum** ada untuk BingX: auto-reply, Catatan Buyer / FTD / UU. Worker auto-reply & capture sengaja melewati
   merchant BingX sampai jalurnya ada.
 

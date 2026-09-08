@@ -161,6 +161,36 @@ async function connectionTest(m, { post = false } = {}) {
   return { ok: steps.every(s => s.ok) && (!post || (postResult && postResult.ok)), steps, driftMs, orders, ads: resultOf(my).length, post: postResult, postMode: POST_MODE };
 }
 
+/**
+ * USDT balance. P2P ads sell from the FUND account, so that is asked first;
+ * the spot account is the fallback. The response shape of the fund endpoint
+ * is not in the P2P PDF (taken from BingX's api-ai-skills reference), so the
+ * parser accepts every layout seen in BingX docs: data.balance[], data.balances[],
+ * data[] — each row { asset, free, locked }.
+ */
+function pickUsdt(data) {
+  const rows = Array.isArray(data?.balance) ? data.balance
+    : Array.isArray(data?.balances) ? data.balances
+    : Array.isArray(data) ? data
+    : (data?.balance && typeof data.balance === 'object' && !Array.isArray(data.balance)) ? [data.balance] : [];
+  const u = rows.find(r => String(r.asset || r.coin || '').toUpperCase() === 'USDT');
+  if (!u) return null;
+  return { free: String(u.free ?? u.available ?? u.balance ?? '0'), locked: String(u.locked ?? u.frozen ?? '0') };
+}
+async function balance(m) {
+  const errors = [];
+  for (const [source, path] of [['fund', P.FUND_BALANCE], ['spot', P.SPOT_BALANCE]]) {
+    try {
+      const res = await bingxGet(path, {}, m.apiKey, m.apiSecret, { priority: true });
+      if (res?.code !== 0) { errors.push(`${source}: ${res?.code} ${res?.msg || ''}`); continue; }
+      const u = pickUsdt(res.data);
+      if (u) return { ...u, source };
+      errors.push(`${source}: USDT tidak ada di jawaban`);
+    } catch (e) { errors.push(`${source}: ${e.bingx?.msg || e.message}`); }
+  }
+  return { free: null, locked: null, source: null, error: errors.join(' | ') };
+}
+
 module.exports = {
-  isBingx, fetchQuick, fetchRange, getDetail, modifyStatus, resolveMembers, listAds, marketAds, connectionTest,
+  isBingx, fetchQuick, fetchRange, getDetail, modifyStatus, resolveMembers, listAds, marketAds, connectionTest, balance,
 };

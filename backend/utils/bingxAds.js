@@ -82,6 +82,16 @@ function buildParams(body, { creating }) {
     .map(Number).filter(n => Number.isInteger(n) && n > 0);
   if (methods.length === 0) throw bad('Pilih minimal satu metode bayar');
   if (methods.length > MAX_METHODS[side]) throw bad(`Maksimal ${MAX_METHODS[side]} metode bayar untuk iklan ${side === 'SELL' ? 'jual' : 'beli'}`);
+  if (Array.isArray(body._methodTypes)) {
+    // { userPaymentMethodId: methodId } supplied by the form — one account per type (BingX 100400)
+    const seen = new Map();
+    for (const id of methods) {
+      const t = body._methodTypes.find(x => Number(x.userPaymentMethodId) === id)?.methodId;
+      if (t === undefined) continue;
+      if (seen.has(t)) throw bad(`BingX hanya mengizinkan satu rekening per jenis (jenis #${t} dipilih dua kali)`);
+      seen.set(t, id);
+    }
+  }
   p.userPaymentMethods = JSON.stringify(methods); // BingX wants the list as a JSON STRING (verified in the PDF examples)
 
   const conds = (Array.isArray(body.userMatchConditions) ? body.userMatchConditions : [])

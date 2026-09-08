@@ -61,6 +61,17 @@ export function announceOrderChanges({ merchantId, merchantName, orders, prevSta
     toast.success(`Order baru — ${merchantName}`, { duration: 4000 });
   }
 
+  // Any difference between this cycle and the last one — state, unread, count
+  // — is broadcast so the app-wide queue re-reads immediately instead of at
+  // its own next tick. The panels poll every 5s; before this the queue could
+  // lag them by a full extra interval, which is exactly what "the panel already
+  // beeped but Antrian is still empty" looks like.
+  const changed = orders.some(o => prevStates[o.advOrderNo] !== o._state || (prevUnread[o.advOrderNo] ?? 0) !== (o.unreadCount || 0))
+    || Object.keys(prevStates).length !== orders.length;
+  if (changed && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('p2p:orders-changed', { detail: { merchantId } }));
+  }
+
   return { states, unread };
 }
 

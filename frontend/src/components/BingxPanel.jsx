@@ -62,6 +62,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
   const [priceEdit, setPriceEdit]     = useState(null); // { advNo, value } while the inline price box is open
   const [adBusy, setAdBusy]           = useState(null); // advNo mid-request
   const [pausedAds, setPausedAds]     = useState([]);
+  const [balance, setBalance]         = useState(null); // { free, locked, source } from the fund account
   const [busyTrading, setBusyTrading] = useState(false);
   const [menuOpen, setMenuOpen]       = useState(false);
   const menuRef = useRef(null);
@@ -76,6 +77,8 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
 
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
+  const fetchBalance = useCallback(() => { merchantApi.balance(merchant.id).then(r => setBalance(r.data || null)).catch(() => {}); }, [merchant.id]);
+  useEffect(() => { fetchBalance(); const t = setInterval(fetchBalance, 30000); return () => clearInterval(t); }, [fetchBalance]);
   useEffect(() => {
     const h = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
     document.addEventListener('mousedown', h);
@@ -177,7 +180,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
       if (ok) {
         setRowDone(order.advOrderNo);
         setTimeout(() => setRowDone(null), 1200);
-        doFetch(false, true);
+        doFetch(false, true); fetchBalance();
       }
     } finally { setRowBusy(null); }
   }
@@ -324,15 +327,16 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-2 mt-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
           {[
+            ['Saldo USDT', balance === null ? '…' : (balance.free === null ? 'n/a' : formatAmount(balance.free, 2)), 'text-buy', balance?.error ? `Saldo tidak terbaca: ${balance.error}` : (balance?.source ? `Akun ${balance.source}${Number(balance.locked) > 0 ? ` · terkunci ${formatAmount(balance.locked, 2)}` : ''}` : '')],
             ['Aktif', activeOrders.length, activeOrders.length > 0 ? 'text-brand-300' : 'text-surface-100'],
             [`Jual (${fiatUnit})`, formatAmount(volSell, 0), 'text-sell'],
             ['USDT keluar', formatAmount(volSellUsdt, 2), 'text-surface-100'],
-          ].map(([l, v, c]) => (
-            <div key={l} className="bg-surface-900 rounded-lg px-2.5 py-2">
+          ].map(([l, v, c, title]) => (
+            <div key={l} className="bg-surface-900 rounded-lg px-2.5 py-2" title={title || undefined}>
               <p className="text-[10px] uppercase tracking-wide text-surface-300 truncate">{l}</p>
-              <p className={`text-sm font-mono font-semibold tnum ${c}`}>{v}</p>
+              <p className={`text-sm font-mono font-semibold tnum truncate ${c}`}>{v}</p>
             </div>
           ))}
         </div>
@@ -519,7 +523,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
       {showAdModal && (
         <BingxAdModal merchant={merchant} existingAd={editAd}
           onClose={() => { setShowAdModal(false); setEditAd(null); }}
-          onSaved={() => fetchAds()} />
+          onSaved={() => { fetchAds(); fetchBalance(); }} />
       )}
     </div>
   );

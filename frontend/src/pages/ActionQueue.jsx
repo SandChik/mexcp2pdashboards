@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import OrderDetailModal from '../components/OrderDetailModal';
 import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge, PlatformBadge, platformOf } from '../components/helpers';
 import { runAction, actionFor } from '../actions';
-import { getQueue, subscribeQueue, refreshQueue, applyActionLocally, getQueueMeta, getActionableCount, getNameIndex, isBuyerLogOn } from '../actionQueue';
+import { getQueue, subscribeQueue, refreshQueue, getQueueMeta, getActionableCount, getNameIndex, isBuyerLogOn } from '../actionQueue';
 import { ordersApi } from '../api';
 import { announceDuplicate } from '../orderEvents';
 import { Zap, RefreshCw, Keyboard, CheckCircle2, Coins, AlertTriangle, Clock, MessageSquare, Copy, User, Landmark, Hourglass, Store } from 'lucide-react';
@@ -113,14 +113,13 @@ export default function ActionQueue() {
     if (!order || busy) return;
     setBusy(order.advOrderNo);
     try {
-      const kind = actionFor(order);
       const ok = await runAction(order.merchantId, order);
       if (ok) {
+        // runAction already broadcast 'p2p:action-done': the queue applied the
+        // change locally (release → row gone, confirm → flips to waiting) and
+        // kicked a refresh. The flash just needs clearing.
         setDoneFlash(order.advOrderNo);
-        // 'confirm' leaves the order running — the row stays and flips to
-        // "waiting"; only 'release' finishes it and removes the row.
-        setTimeout(() => { applyActionLocally(order.advOrderNo, kind); setDoneFlash(null); }, 900);
-        refreshQueue();
+        setTimeout(() => setDoneFlash(null), 900);
       }
     } finally { setBusy(null); }
   }, [busy]);

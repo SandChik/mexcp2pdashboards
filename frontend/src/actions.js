@@ -153,7 +153,14 @@ export async function confirmPaidOrder(merchantId, order, { skipConfirm = false 
 /** Run whichever action this order is eligible for. */
 export async function runAction(merchantId, order, opts) {
   const a = actionFor(order);
-  if (a === 'release') return releaseOrder(merchantId, order, opts);
-  if (a === 'confirm') return confirmPaidOrder(merchantId, order, opts);
-  return false;
+  let ok = false;
+  if (a === 'release') ok = await releaseOrder(merchantId, order, opts);
+  else if (a === 'confirm') ok = await confirmPaidOrder(merchantId, order, opts);
+  // Tell the app-wide queue right away — whichever screen the click came from
+  // (panel row, modal, queue). Without this the queue only learned about it at
+  // its next poll, i.e. the released order sat there for up to 10 seconds.
+  if (ok && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('p2p:action-done', { detail: { merchantId, advOrderNo: order.advOrderNo, kind: a } }));
+  }
+  return ok;
 }

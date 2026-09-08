@@ -115,7 +115,7 @@ router.post('/:id/service-switch', authMiddleware, async (req, res) => {
 router.get('/:id/balance', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.id);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
-  if (bx.isBingx(merchant)) return res.json({ free: null, locked: null, unsupported: true }); // not in the P2P API set
+  if (bx.isBingx(merchant)) return res.json(await bx.balance(merchant)); // fund account first, spot as fallback
   try {
     const result = await mexcGet('/api/v3/account', {}, merchant.apiKey, merchant.apiSecret, { priority: true });
     const usdt = (result.balances || []).find(b => b.asset === 'USDT');
