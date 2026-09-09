@@ -85,8 +85,17 @@ Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
   berhasil (dari panel, modal, atau Antrian) langsung mendorong Antrian
   memperbarui diri; aksi juga diterapkan lokal seketika dan dilindungi 20 detik
   dari snapshot bursa yang masih ketinggalan.
-- Yang **belum** ada untuk BingX: auto-reply, Catatan Buyer / FTD / UU. Worker auto-reply & capture sengaja melewati
-  merchant BingX sampai jalurnya ada.
+- Auto-reply BingX (v66): worker server yang sama dengan MEXC — aturan &
+  ledger klaim sama — mengirim lewat chat REST BingX; sebelum kirim, riwayat
+  chat dibaca ulang supaya tidak dobel.
+- Yang **belum** ada untuk BingX: Catatan Buyer / FTD / UU. Worker capture
+  sengaja melewati merchant BingX sampai jalurnya ada.
+- Logo (v66): `frontend/public/brand/` — BingX & MEXC di panel, nav, dan judul;
+  emblem SandChik di sidebar & judul dashboard.
+- Antrian v66: panel MEXC dan BingX **mendorong** daftar ordernya langsung ke
+  Antrian setiap kali memuat (tanpa permintaan kedua), dan order yang sudah
+  pernah dilaporkan selesai tidak akan muncul lagi sebagai berjalan selama 10
+  menit walau snapshot bursa sempat ketinggalan.
 
 Cara kerja di belakang: `backend/utils/bingxApi.js` (tanda tangan + parser
 aman angka 19 digit + gerbang 2 req/detik per merchant),

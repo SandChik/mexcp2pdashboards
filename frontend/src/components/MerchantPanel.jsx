@@ -6,6 +6,7 @@ import {
 } from './helpers';
 import { playSound } from '../sounds';
 import { announceOrderChanges } from '../orderEvents';
+import { ingestOrders } from '../actionQueue';
 import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
 import OrderDetailModal from './OrderDetailModal';
@@ -173,6 +174,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
       ordersRef.current = normalized;
+      ingestOrders(merchant.id, merchant.name, 'mexc', normalized); // queue sees it the same instant (v66)
       setOrders(normalized); setLastSync(Date.now()); setSyncError(false); syncErrorRef.current = false;
     } catch (e) {
       // Sound only on the transition into an error state, not every 5s poll.
@@ -442,6 +444,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       <div className="px-3 sm:px-3.5 pt-3 pb-3 border-b border-surface-700">
         <div className="flex items-center justify-between h-6">
           <div className="flex items-center gap-2 min-w-0">
+            <img src="/brand/mexc.png" alt="MEXC" className="w-5 h-5 rounded-md flex-shrink-0 bg-white" />
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${serviceOpen ? 'bg-buy shadow-glow-buy animate-pulse' : 'bg-sell'}`} />
             <span className="font-semibold text-surface-50 text-sm truncate">{merchant.name}</span>
             {refreshing && <RefreshCw size={11} className="text-brand-400 animate-spin flex-shrink-0" />}

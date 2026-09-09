@@ -6,6 +6,8 @@ const { fetchRecentOrders, normState } = require('./captureCore');
 const wsManager = require('./wsManager');
 const { claim, release } = require('./autoReplyLedger');
 const { audit } = require('./audit');
+const bx = require('./bingxOrders');
+const bxChat = require('./bingxChat');
 
 /**
  * Auto-reply worker.
@@ -39,8 +41,10 @@ let running = false;
 let timer = null;
 const primed = new Set();   // merchantIds whose baseline states are recorded
 
-/** Resolve conversation id for an order, then ensure a live socket. */
+/** Resolve conversation id for an order, then ensure a live socket.
+ *  BingX: the order number is the room and there is no socket — REST only. */
 async function openChat(merchant, advOrderNo) {
+  if (bx.isBingx(merchant)) return String(advOrderNo);
   const cr = await mexcGet('/api/v3/fiat/retrieveChatConversation', { orderNo: advOrderNo }, merchant.apiKey, merchant.apiSecret);
   const cid = cr?.data?.conversationId ?? cr?.conversationId;
   if (!cid) throw new Error('no conversationId');
@@ -56,6 +60,13 @@ async function openChat(merchant, advOrderNo) {
 
 /** True when this exact text is already in the conversation, sent by us. */
 async function alreadySaid(merchant, cid, text) {
+  if (bx.isBingx(merchant)) {
+    try {
+      const msgs = await bxChat.history(merchant, cid, 30);
+      const target = text.trim();
+      return msgs.some(m => m.self && String(m.content || '').trim() === target);
+    } catch { return false; } // can't verify → the claim ledger is still in force
+  }
   try {
     const h = await mexcGet('/api/v3/fiat/retrieveChatMessageWithPagination',
       { conversationId: cid, page: 1, limit: 30, sort: 'DESC' }, merchant.apiKey, merchant.apiSecret);
@@ -83,10 +94,9 @@ async function cycle() {
   running = true;
   let sentThisCycle = 0;
   try {
-    // BingX has no WebSocket chat; its auto-reply path arrives in a later slice.
-    // Until then BingX merchants are skipped so this MEXC-only loop never runs
-    // against a BingX key.
-    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(m => m && m.platform !== 'bingx');
+    // Both platforms. BingX: orders via bingxOrders.fetchQuick (running + latest
+    // ended), chat via REST (history to double-check, sendMsg to send).
+    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(Boolean);
     if (merchants.length === 0) return;
     const settings = readSettingsSafe();
     const states = readJson(STATE_PATH);
@@ -98,8 +108,12 @@ async function cycle() {
       if (rules.length === 0) continue;
 
       let orders;
-      try { orders = await fetchRecentOrders(merchant, 24, 3); }
-      catch (e) { console.error(`[autoreply] ${merchant.name}: fetch gagal —`, e.response?.data?.msg || e.message); continue; }
+      try {
+        orders = bx.isBingx(merchant)
+          ? (await bx.fetchQuick(merchant)).map(o => ({ ...o, _state: o.state }))
+          : await fetchRecentOrders(merchant, 24, 3);
+      }
+      catch (e) { console.error(`[autoreply] ${merchant.name}: fetch gagal —`, e.response?.data?.msg || e.bingx?.msg || e.message); continue; }
 
       const prev = states[merchant.id] || {};
       const next = {};
@@ -134,7 +148,13 @@ async function cycle() {
         for (const rule of matched.filter(r => granted.includes(r.id))) {
           // Guard 3: check the conversation itself right before sending.
           if (await alreadySaid(merchant, cid, rule.message)) continue;
-          const r = wsManager.send(merchant.id, cid, rule.message);
+          let r;
+          if (bx.isBingx(merchant)) {
+            try { r = await bxChat.sendText(merchant, cid, rule.message); }
+            catch (e) { r = { success: false, error: e.bingx?.msg || e.message }; }
+          } else {
+            r = wsManager.send(merchant.id, cid, rule.message);
+          }
           if (r?.success) {
             sentThisCycle++;
             console.log(`[autoreply] ${merchant.name} → ${o.userInfo?.nickName || o.advOrderNo} (${rule.id})`);

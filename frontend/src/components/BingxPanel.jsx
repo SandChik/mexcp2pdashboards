@@ -6,6 +6,7 @@ import {
 } from './helpers';
 import { playSound } from '../sounds';
 import { announceOrderChanges } from '../orderEvents';
+import { ingestOrders } from '../actionQueue';
 import { actionFor, runAction } from '../actions';
 import OrderDetailModal from './OrderDetailModal';
 import BingxAdModal from './BingxAdModal';
@@ -137,6 +138,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
       });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
       ordersRef.current = normalized;
+      ingestOrders(merchant.id, merchant.name, 'bingx', normalized); // queue sees it the same instant
       setOrders(normalized); setSyncError(false); syncErrorRef.current = false;
     } catch (e) {
       if (!syncErrorRef.current) playSound('error');
@@ -290,6 +292,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
       <div className="px-3 sm:px-3.5 pt-3 pb-3 border-b border-surface-700">
         <div className="flex items-center justify-between h-6">
           <div className="flex items-center gap-2 min-w-0">
+            <img src="/brand/bingx.png" alt="BingX" className="w-5 h-5 rounded-md flex-shrink-0 bg-white" />
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${syncError ? 'bg-sell' : 'bg-warning shadow-glow-sm animate-pulse'}`} />
             <span className="font-semibold text-surface-50 text-sm truncate">{merchant.name}</span>
             <PlatformBadge platform="bingx" />

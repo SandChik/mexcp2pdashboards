@@ -3,7 +3,7 @@ import { merchantApi } from '../api';
 import BingxPanel from '../components/BingxPanel';
 import Layout from '../components/Layout';
 import { PlatformBadge } from '../components/helpers';
-import { Plus, RefreshCw, Calendar, Radio, Hexagon } from 'lucide-react';
+import { Plus, RefreshCw, Calendar, Radio } from 'lucide-react';
 import { subscribeQueue, getActiveByMerchant } from '../actionQueue';
 import { useNavigate } from 'react-router-dom';
 
@@ -81,8 +81,9 @@ export default function BingxDashboard() {
         <header className="glass border-b flex-shrink-0 z-30">
           <div className="flex items-center justify-between gap-2 px-3 sm:px-4 h-14">
             <div className="flex items-center gap-2 min-w-0">
-              <Hexagon size={16} className="text-warning flex-shrink-0" />
-              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">Dashboard BingX</h1>
+              <img src="/brand/sandchik-mark.png" alt="SandChik" className="w-7 h-7 rounded-md bg-[#f6f3ee] flex-shrink-0" />
+              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">SandChik P2P</h1>
+              <img src="/brand/bingx.png" alt="BingX" className="w-5 h-5 rounded-md bg-white flex-shrink-0" title="Dashboard BingX" />
               <span className="hidden xs:inline text-xs text-surface-300 flex-shrink-0">{merchants.length} merchant</span>
             </div>
 
@@ -135,8 +136,8 @@ export default function BingxDashboard() {
 
         {shown.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/30 flex items-center justify-center mb-1">
-              <Hexagon size={22} className="text-warning" />
+            <div className="w-14 h-14 rounded-2xl bg-white border border-warning/30 flex items-center justify-center mb-1 overflow-hidden">
+              <img src="/brand/bingx.png" alt="BingX" className="w-12 h-12" />
             </div>
             <p className="text-surface-50 font-medium flex items-center gap-2">Belum ada merchant <PlatformBadge platform="bingx" /></p>
             <p className="text-sm text-surface-300 max-w-xs">Tambahkan akun merchant BingX di Settings (pilih platform BingX), lalu jalankan "Tes koneksi" di sana sebelum mengandalkan panel ini.</p>

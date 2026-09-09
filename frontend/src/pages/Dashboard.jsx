@@ -193,8 +193,10 @@ export default function Dashboard() {
         {/* ── Top bar ─────────────────────────────────────────────────── */}
         <header className="glass border-b flex-shrink-0 z-30">
           <div className="flex items-center justify-between gap-2 px-3 sm:px-4 h-14">
-            <div className="flex items-baseline gap-2 min-w-0">
-              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">P2P Dashboard</h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <img src="/brand/sandchik-mark.png" alt="SandChik" className="w-7 h-7 rounded-md bg-[#f6f3ee] flex-shrink-0" />
+              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">SandChik P2P</h1>
+              <img src="/brand/mexc.png" alt="MEXC" className="w-5 h-5 rounded-md bg-white flex-shrink-0" title="Dashboard MEXC" />
               <span className="hidden xs:inline text-xs text-surface-300 flex-shrink-0">{merchants.length} merchant</span>
             </div>
 

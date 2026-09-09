@@ -53,18 +53,69 @@ let announcing = false;       // true while THIS poller announces, so its own br
 // just-released order as PAID for a second or two, and without this the very
 // next refresh put the row straight back until the poll after that.
 const recentLocal = new Map();  // advOrderNo -> { action, at }
-const LOCAL_GRACE_MS = 20000;
+const LOCAL_GRACE_MS = 60000;
+// Orders ANY source has already reported as finished (done/cancelled/timeout…).
+// Exchanges are eventually consistent: one snapshot says "done", the next
+// (from another poller, or a manual refresh) says "paid" again. Once finished
+// is finished — for ten minutes such an order is never shown running again.
+const knownTerminal = new Map(); // advOrderNo -> at
+const TERMINAL_TTL_MS = 10 * 60000;
+function noteTerminal(list) {
+  const now = Date.now();
+  list.forEach(o => { if (!RUNNING.includes(o._state)) knownTerminal.set(o.advOrderNo, now); });
+  for (const [no, at] of knownTerminal) if (now - at > TERMINAL_TTL_MS) knownTerminal.delete(no);
+}
 function reconcile(list) {
   const now = Date.now();
   for (const [no, v] of recentLocal) if (now - v.at > LOCAL_GRACE_MS) recentLocal.delete(no);
-  if (recentLocal.size === 0) return list;
   return list.flatMap(o => {
+    if (knownTerminal.has(o.advOrderNo) && RUNNING.includes(o._state)) return [];      // resurrected by a stale snapshot → drop
     const r = recentLocal.get(o.advOrderNo);
     if (!r) return [o];
     if (r.action === 'release') return RUNNING.includes(o._state) ? [] : [o];           // server still says running → trust ourselves
     if (r.action === 'confirm' && o._state === 0) return [{ ...o, state: 1, _state: 1 }]; // we paid; don't show "confirm" again
     return [o];
   });
+}
+function sortItems(list) {
+  return list.slice().sort((a, b) => {
+    const aa = actionFor(a) ? 0 : 1, ab = actionFor(b) ? 0 : 1;
+    if (aa !== ab) return aa - ab;
+    const da = a.payTimeLimit || Infinity, db = b.payTimeLimit || Infinity;
+    if (da !== db) return da - db;
+    return (b.createTime || 0) - (a.createTime || 0);
+  });
+}
+
+/**
+ * Push path: a panel that has just fetched a merchant's orders hands the list
+ * straight to the queue. No second request, no cache, no waiting for a tick —
+ * the queue shows exactly what the panel shows, at the same instant. Rows for
+ * orders the panel didn't include (outside its date range) are left alone;
+ * the poll keeps those honest.
+ */
+export function ingestOrders(merchantId, merchantName, platform, list) {
+  if (!merchantId || !Array.isArray(list)) return;
+  const norm = list.map(o => ({ ...o, _state: normalizeState(o._state ?? o.state), merchantId, merchantName, platform: platform || o.platform || 'mexc' }));
+  noteTerminal(norm);
+  const running = reconcile(norm.filter(o => RUNNING.includes(o._state)));
+  const seen = new Set(norm.map(o => o.advOrderNo));
+  const kept = items.filter(o => !(o.merchantId === merchantId && seen.has(o.advOrderNo)) && !(o.merchantId === merchantId && !RUNNING.includes(o._state)));
+  // A row this merchant had in the queue but the panel no longer lists as
+  // running is finished (the panel's list always contains every running order).
+  const stillRunning = kept.filter(o => o.merchantId !== merchantId || running.some(r => r.advOrderNo === o.advOrderNo) || !seen.has(o.advOrderNo));
+  items = sortItems(stillRunning.concat(running));
+  actionableCount = items.filter(o => actionFor(o)).length;
+  activeByMerchant = { ...activeByMerchant, [merchantId]: items.filter(o => o.merchantId === merchantId).length };
+  // The panel already announced this batch; record it as our baseline too so
+  // our own next poll doesn't re-announce the same transition.
+  const st = {}; const un = {};
+  norm.forEach(o => { st[o.advOrderNo] = o._state; un[o.advOrderNo] = o.unreadCount || 0; });
+  prevStates[merchantId] = { ...(prevStates[merchantId] || {}), ...st };
+  prevUnread[merchantId] = { ...(prevUnread[merchantId] || {}), ...un };
+  seededMerchants.add(merchantId);
+  lastSync = Date.now();
+  emit();
 }
 
 const emit = () => listeners.forEach(fn => { try { fn(); } catch { /* */ } });
@@ -144,6 +195,7 @@ export async function refreshQueue() {
         seededMerchants.add(m.id);
         announcing = false;
 
+        noteTerminal(norm);
         const running = reconcile(norm.filter(o => RUNNING.includes(o._state)));
         return {
           mid: m.id,
@@ -162,17 +214,12 @@ export async function refreshQueue() {
     activeByMerchant = nextActive;
 
     const ok = results.filter(Boolean);
-    actionableCount = ok.reduce((n, r) => n + r.actionable, 0);
-    items = ok.flatMap(r => r.running).sort((a, b) => {
-      // Orders needing action first — the whole point of the page is that the
-      // work sits at the top and the merely-running orders sit below it.
-      const aa = actionFor(a) ? 0 : 1, ab = actionFor(b) ? 0 : 1;
-      if (aa !== ab) return aa - ab;
-      // Then soonest deadline; orders without a deadline sink to the bottom.
-      const da = a.payTimeLimit || Infinity, db = b.payTimeLimit || Infinity;
-      if (da !== db) return da - db;
-      return (b.createTime || 0) - (a.createTime || 0);
-    });
+    const okIds = new Set(ok.map(r => r.mid));
+    // Merchants whose fetch failed this cycle keep their previous rows.
+    const carried = items.filter(o => !okIds.has(o.merchantId));
+    // Actionable first, then soonest deadline, then newest (sortItems).
+    items = sortItems(carried.concat(ok.flatMap(r => r.running)));
+    actionableCount = items.filter(o => actionFor(o)).length;
     lastSync = Date.now();
     emit();
   } finally {

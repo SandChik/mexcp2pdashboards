@@ -141,14 +141,14 @@ function normalizeDetail(d, merchant) {
       kycLevel: undefined,
     },
     _self: { memberId: us.uid !== undefined ? String(us.uid) : null, nickName: us.nickname || '', realName: us.realName || null },
-    // When WE sell, the order's payment methods are OURS (what the buyer pays
-    // into). They are deliberately NOT put in paymentInfo/confirmPaymentInfo:
-    // the release dialog would then print our own bank as if it were the
-    // buyer's. The modal shows them under their own heading instead.
-    // When WE buy, they are the seller's — the account we have to pay.
-    merchantPaymentInfo: weSell ? methods : [],
-    paymentInfo: weSell ? [] : methods,
-    confirmPaymentInfo: weSell ? null : (methods[0] || null),
+    // The order's payment methods, in the SAME meaning MEXC gives them:
+    // when we sell they are OUR accounts the buyer pays into — which is exactly
+    // what the operator needs to see ("check mutasi at bank X"); when we buy
+    // they are the seller's account we must pay. paymentInfo = all of them,
+    // confirmPaymentInfo = the first (BingX only ever attaches the one used).
+    merchantPaymentInfo: methods,
+    paymentInfo: methods,
+    confirmPaymentInfo: methods[0] || null,
     hidePaymentInfo: d.hidePaymentInfo,
     _bingx: { ...base._bingx, hidePaymentInfo: d.hidePaymentInfo },
     _raw: d, // untouched BingX payload — shown by the modal's "Raw API data"

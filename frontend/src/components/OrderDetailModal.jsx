@@ -383,21 +383,6 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                 ))}
               </div>
 
-              {/* BingX, we sell: the accounts the buyer paid INTO — ours. Kept out
-                  of paymentInfo on purpose so the release dialog never presents
-                  our own bank as the buyer's. */}
-              {isBingx && order.merchantPaymentInfo?.length > 0 && (
-                <Section title="Rekening Anda di order ini (buyer bayar ke sini)">
-                  {order.merchantPaymentInfo.map((p, i) => (
-                    <div key={i} className="bg-surface-800 rounded-lg p-3 space-y-1.5 text-sm">
-                      <Row label="Metode" value={p.bankName || p.payMethod} />
-                      {p.account && <Row label="Akun" value={p.account} copy onCopy={copyText} />}
-                      {p.payee && <Row label="A/N" value={p.payee} />}
-                      {p.detail && !p.account && <Row label="Detail" value={p.detail} />}
-                    </div>
-                  ))}
-                </Section>
-              )}
               {isBingx && order._bingx?.hidePaymentInfo === 1 && order._bingx?.paymentInfoSentStatus === 0 && stateNum === 0 && (
                 <div className="bg-warning/10 border border-warning/30 rounded-lg px-4 py-3 flex items-center gap-3">
                   <AlertCircle size={16} className="text-warning flex-shrink-0" />

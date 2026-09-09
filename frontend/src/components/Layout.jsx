@@ -1,12 +1,20 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Users, UserPlus, BookUser, Settings, LogOut, Zap, Hexagon } from 'lucide-react';
+import { Users, UserPlus, BookUser, Settings, LogOut, Zap } from 'lucide-react';
+
+// Brand marks (frontend/public/brand, upscaled from the operator's own files).
+// Same call signature as a lucide icon so NAV can mix them.
+const brandIcon = (src, alt) => function BrandIcon({ size = 18, className = '' }) {
+  return <img src={src} alt={alt} width={size} height={size} className={`rounded-[4px] bg-white ${className}`} style={{ width: size, height: size }} />;
+};
+const MexcIcon = brandIcon('/brand/mexc.png', 'MEXC');
+const BingxIcon = brandIcon('/brand/bingx.png', 'BingX');
 import { subscribeQueue, getActionableCount } from '../actionQueue';
 
 const NAV = [
-  { to: '/',         icon: LayoutDashboard, label: 'Dashboard MEXC', short: 'MEXC' },
-  { to: '/bingx',    icon: Hexagon,         label: 'Dashboard BingX', short: 'BingX' },
+  { to: '/',         icon: MexcIcon,        label: 'Dashboard MEXC', short: 'MEXC' },
+  { to: '/bingx',    icon: BingxIcon,       label: 'Dashboard BingX', short: 'BingX' },
   { to: '/queue',    icon: Zap,             label: 'Antrian',   short: 'Antrian', badge: true },
   { to: '/uu',       icon: Users,           label: 'Unique Users', short: 'UU'  },
   { to: '/ftd',      icon: UserPlus,        label: 'FTD',       short: 'FTD'    },
@@ -31,8 +39,8 @@ export default function Layout({ children }) {
 
       {/* ── Desktop: icon rail with hover labels ─────────────────────────── */}
       <aside className="hidden md:flex w-14 border-r border-surface-700 glass flex-col items-center py-3 gap-1 flex-shrink-0">
-        <div className="w-9 h-9 rounded-lg bg-grad-brand shadow-glow flex items-center justify-center mb-3">
-          <span className="text-white font-bold text-base">M</span>
+        <div className="w-9 h-9 rounded-lg overflow-hidden shadow-glow mb-3 bg-[#f6f3ee]" title="SandChik Crypto Exchange">
+          <img src="/brand/sandchik-mark.png" alt="SandChik" className="w-9 h-9" />
         </div>
         {NAV.map(({ to, icon: Icon, label, badge }) => (
           <NavLink key={to} to={to} end={to === '/'}

@@ -112,7 +112,7 @@ export default function MessageSettings() {
         </div>
         <p className="text-[11px] text-surface-300 mt-1">Template di bawah hanya berlaku untuk <b className="text-surface-200">{merchantName || '—'}</b>. Tiap merchant punya set sendiri.</p>
         {merchants.find(m => m.id === mid)?.platform === 'bingx' && (
-          <p className="text-[11px] text-warning mt-1">Merchant BingX: template tersimpan, tapi auto-reply BingX belum berjalan (menyusul di irisan chat).</p>
+          <p className="text-[11px] text-surface-300 mt-1">Merchant BingX: dikirim lewat chat REST BingX oleh worker server (tiap 15 detik), aturan yang sama seperti MEXC.</p>
         )}
       </div>
 
