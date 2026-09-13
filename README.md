@@ -87,7 +87,13 @@ Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
   dari snapshot bursa yang masih ketinggalan.
 - Auto-reply BingX (v66): worker server yang sama dengan MEXC — aturan &
   ledger klaim sama — mengirim lewat chat REST BingX; sebelum kirim, riwayat
-  chat dibaca ulang supaya tidak dobel.
+  chat dibaca ulang supaya tidak dobel. v67: Settings → Pesan menampilkan
+  status worker per merchant (siklus, order terlihat, aturan, kecocokan
+  terakhir & hasilnya, error terakhir) — baca ini dulu sebelum menyimpulkan
+  "auto-reply tidak jalan".
+- Dashboard BingX v67: filter tanggal sama dengan MEXC (popover/sheet, preset,
+  rentang khusus ≤ 8 hari) + preset event Senin→sekarang dan event minggu lalu
+  (Senin s/d Minggu). Rentang > 3 hari membaca sampai 2.000 order.
 - Yang **belum** ada untuk BingX: Catatan Buyer / FTD / UU. Worker capture
   sengaja melewati merchant BingX sampai jalurnya ada.
 - Logo (v66): `frontend/public/brand/` — BingX & MEXC di panel, nav, dan judul;

@@ -154,6 +154,13 @@ router.post('/:id/bingx-test', authMiddleware, async (req, res) => {
   res.json(report);
 });
 
+// GET /api/merchants/:id/auto-reply-status — what the server worker did for this merchant
+router.get('/:id/auto-reply-status', authMiddleware, (req, res) => {
+  const merchant = getMerchant(req.params.id);
+  if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  res.json(require('../utils/autoReplyWorker').status(merchant.id));
+});
+
 // GET /api/merchants/:id/settings — per-merchant dashboard settings
 router.get('/:id/settings', authMiddleware, (req, res) => {
   res.json({ ...DEFAULT_SETTINGS, ...(readSettings()[req.params.id] || {}) });

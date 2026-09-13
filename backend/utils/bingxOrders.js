@@ -47,8 +47,11 @@ async function fetchQuick(m) {
  * "all orders" until the page's oldest row predates the range (max 6 pages =
  * 600 orders — the dashboard's own range is capped at 8 days anyway).
  */
-async function fetchRange(m, startTime, endTime, maxPages = 6) {
+async function fetchRange(m, startTime, endTime, maxPages) {
   const start = Number(startTime) || 0, end = Number(endTime) || Date.now();
+  // Page budget scales with the range: ~600 orders for a day or two, up to
+  // 2,000 for an event week. Each page costs one gated call (~0.5s).
+  if (!maxPages) { const days = (end - start) / 86400000; maxPages = days > 3 ? 20 : 6; }
   let all = [];
   for (let page = 0; page < maxPages; page++) {
     const { items } = await listPage(m, 0, page, 100);

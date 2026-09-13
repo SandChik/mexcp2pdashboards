@@ -111,7 +111,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
     try {
       const params = {
         startTime: rangeRef.current.startTime,
-        endTime: rangeRef.current.kind === 'custom' ? rangeRef.current.endTime : Date.now(),
+        endTime: ['custom', 'lastEvent'].includes(rangeRef.current.kind) ? rangeRef.current.endTime : Date.now(),
       };
       const r = quick
         ? await ordersApi.marketQuick(merchant.id, params)
@@ -124,8 +124,9 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
         // that set are carried over from the last full fetch, then clipped.
         const fresh = new Set(normalized.map(o => o.advOrderNo));
         const kept = ordersRef.current.filter(o => !fresh.has(o.advOrderNo));
+        const fixedEnd = ['custom', 'lastEvent'].includes(rangeRef.current.kind) ? rangeRef.current.endTime : Infinity;
         normalized = normalized.concat(kept)
-          .filter(o => (o.createTime || 0) >= rangeRef.current.startTime)
+          .filter(o => (o.createTime || 0) >= rangeRef.current.startTime && (o.createTime || 0) <= fixedEnd)
           .sort((a, b) => (b.createTime || 0) - (a.createTime || 0));
       }
       const { states: ns, unread: nu } = announceOrderChanges({

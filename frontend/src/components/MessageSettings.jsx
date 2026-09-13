@@ -44,6 +44,18 @@ export default function MessageSettings() {
     }).catch(() => {});
   }, []);
 
+  // Worker diagnostics: what the server-side sender did for this merchant.
+  const [wstat, setWstat] = useState(null);
+  useEffect(() => {
+    if (!mid) return;
+    let alive = true;
+    const load = () => merchantApi.autoReplyStatus(mid).then(r => alive && setWstat(r.data)).catch(() => alive && setWstat(null));
+    load();
+    const t = setInterval(load, 10000);
+    return () => { alive = false; clearInterval(t); };
+  }, [mid]);
+  const ago = (ts) => ts ? `${Math.max(0, Math.round((Date.now() - ts) / 1000))} dtk lalu` : '—';
+
   useEffect(() => {
     if (!mid) return;
     setLoading(true);
@@ -144,7 +156,25 @@ export default function MessageSettings() {
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
             </button>
           </div>
-          {!enabled && <p className="text-[11px] text-surface-300">Auto-reply mati untuk merchant ini. Nyalakan toggle agar aturan dijalankan (selama dashboard terbuka).</p>}
+          {!enabled && <p className="text-[11px] text-surface-300">Auto-reply mati untuk merchant ini. Nyalakan toggle agar aturan dijalankan oleh worker server.</p>}
+
+          {/* Worker status — answers "kenapa belum kirim?" without SSH */}
+          {wstat && (
+            <div className="bg-surface-900 border border-surface-700 rounded-lg p-2.5 text-[11px] font-mono space-y-1">
+              <p className="text-surface-300 uppercase tracking-wide text-[10px]">Status worker server</p>
+              {!wstat.workerOn && <p className="text-sell">Worker DIMATIKAN (AUTO_REPLY_WORKER=0 di service).</p>}
+              <p className="text-surface-200">siklus: {wstat.cycles} · terakhir {ago(wstat.lastCycleAt)} · interval {Math.round(wstat.intervalMs / 1000)}s · server hidup {Math.round(wstat.uptimeMs / 60000)} mnt</p>
+              <p className="text-surface-200">order terlihat: {wstat.ordersSeen} (berjalan {wstat.running}) · aturan aktif: {wstat.rulesActive} · terkirim sejak restart: {wstat.sent}</p>
+              {wstat.skipped && <p className="text-warning">dilewati: {wstat.skipped}</p>}
+              {!wstat.primed && wstat.cycles === 0 && <p className="text-surface-300">belum ada siklus untuk merchant ini (baru ditambah? tunggu ≤15 dtk)</p>}
+              {wstat.lastMatch && (
+                <p className="text-surface-200">cocok terakhir: order …{String(wstat.lastMatch.advOrderNo).slice(-6)} aturan {wstat.lastMatch.rules.join(',')} ({wstat.lastMatch.isNew ? 'order baru' : `status ${wstat.lastMatch.prevState}→${wstat.lastMatch.state}`}) → <b className={wstat.lastMatch.result === 'terkirim' ? 'text-buy' : 'text-warning'}>{wstat.lastMatch.result || '…'}</b> · {ago(wstat.lastMatch.at)}</p>
+              )}
+              {wstat.lastSentAt && <p className="text-buy">kirim terakhir: {ago(wstat.lastSentAt)}</p>}
+              {wstat.lastError && <p className="text-sell">error terakhir: {wstat.lastError}</p>}
+              <p className="text-surface-300/80">Aturan hanya menyala saat order BERPINDAH ke status itu setelah siklus pertama; order yang sudah ada saat server restart tidak dibalas.</p>
+            </div>
+          )}
 
           {rules.length === 0 && <p className="text-[11px] text-surface-300">Belum ada aturan. Klik "Add rule".</p>}
           {rules.map((r) => (

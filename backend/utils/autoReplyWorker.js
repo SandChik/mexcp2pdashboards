@@ -40,6 +40,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let running = false;
 let timer = null;
 const primed = new Set();   // merchantIds whose baseline states are recorded
+const startedAt = Date.now();
+// Per-merchant diagnostics for Settings → Pesan ("why didn't it send?").
+const diag = {};            // merchantId -> { ... }
+function d(mid) { return diag[mid] || (diag[mid] = { cycles: 0, sent: 0, lastCycleAt: null, ordersSeen: 0, running: 0, rulesActive: 0, primedAt: null, lastMatch: null, lastSentAt: null, lastError: null, skipped: null }); }
+function status(mid) {
+  const x = d(mid);
+  return { ...x, workerOn: process.env.AUTO_REPLY_WORKER !== '0', intervalMs: INTERVAL_MS, uptimeMs: Date.now() - startedAt, primed: primed.has(mid) };
+}
 
 /** Resolve conversation id for an order, then ensure a live socket.
  *  BingX: the order number is the room and there is no socket — REST only. */
@@ -102,18 +110,27 @@ async function cycle() {
     const states = readJson(STATE_PATH);
 
     for (const merchant of merchants) {
+      const dg = d(merchant.id);
+      dg.cycles++; dg.lastCycleAt = Date.now(); dg.skipped = null;
       const cfg = settings[merchant.id] || {};
-      if (cfg.autoReplyEnabled === false) continue;
+      if (cfg.autoReplyEnabled === false) { dg.skipped = 'auto-reply OFF untuk merchant ini'; continue; }
       const rules = Array.isArray(cfg.autoReplyRules) ? cfg.autoReplyRules : [];
-      if (rules.length === 0) continue;
+      dg.rulesActive = rules.filter(r => r.message && r.message.trim()).length;
+      if (rules.length === 0) { dg.skipped = 'belum ada aturan'; continue; }
 
       let orders;
       try {
         orders = bx.isBingx(merchant)
           ? (await bx.fetchQuick(merchant)).map(o => ({ ...o, _state: o.state }))
           : await fetchRecentOrders(merchant, 24, 3);
+        dg.lastError = null;
       }
-      catch (e) { console.error(`[autoreply] ${merchant.name}: fetch gagal —`, e.response?.data?.msg || e.bingx?.msg || e.message); continue; }
+      catch (e) {
+        dg.lastError = `fetch: ${e.response?.data?.msg || e.bingx?.msg || e.message}`;
+        console.error(`[autoreply] ${merchant.name}: fetch gagal —`, dg.lastError); continue;
+      }
+      dg.ordersSeen = orders.length;
+      dg.running = orders.filter(o => [0, 1, 2, 3, 9].includes(o._state)).length;
 
       const prev = states[merchant.id] || {};
       const next = {};
@@ -121,8 +138,9 @@ async function cycle() {
 
       // Guard 1: never send on the first pass for a merchant.
       if (!primed.has(merchant.id)) {
-        primed.add(merchant.id);
+        primed.add(merchant.id); dg.primedAt = Date.now();
         states[merchant.id] = { ...prev, ...next };
+        dg.skipped = 'siklus pertama setelah restart: hanya mencatat status';
         continue;
       }
 
@@ -132,22 +150,24 @@ async function cycle() {
         const isNew = prevState === undefined;
         const matched = matchRules(rules, o, prevState, isNew);
         if (matched.length === 0) continue;
+        dg.lastMatch = { at: Date.now(), advOrderNo: o.advOrderNo, rules: matched.map(r => r.id), isNew, prevState, state: o._state };
 
         // Guard 2: the ledger grants each (order, rule) exactly once, ever.
         const granted = claim(merchant.id, o.advOrderNo, matched.map(r => r.id));
-        if (granted.length === 0) continue;
+        if (granted.length === 0) { dg.lastMatch.result = 'sudah pernah dikirim (ledger)'; continue; }
 
         let cid;
         try { cid = await openChat(merchant, o.advOrderNo); }
         catch (e) {
           release(merchant.id, o.advOrderNo, granted); // retry next cycle
+          dg.lastError = `chat: ${e.message}`; dg.lastMatch.result = dg.lastError;
           console.error(`[autoreply] ${merchant.name} ${o.advOrderNo}: chat gagal —`, e.message);
           continue;
         }
 
         for (const rule of matched.filter(r => granted.includes(r.id))) {
           // Guard 3: check the conversation itself right before sending.
-          if (await alreadySaid(merchant, cid, rule.message)) continue;
+          if (await alreadySaid(merchant, cid, rule.message)) { dg.lastMatch.result = 'teks yang sama sudah ada di chat'; continue; }
           let r;
           if (bx.isBingx(merchant)) {
             try { r = await bxChat.sendText(merchant, cid, rule.message); }
@@ -156,11 +176,12 @@ async function cycle() {
             r = wsManager.send(merchant.id, cid, rule.message);
           }
           if (r?.success) {
-            sentThisCycle++;
+            sentThisCycle++; dg.sent++; dg.lastSentAt = Date.now(); dg.lastMatch.result = 'terkirim';
             console.log(`[autoreply] ${merchant.name} → ${o.userInfo?.nickName || o.advOrderNo} (${rule.id})`);
             audit({ action: 'auto_reply_sent', merchantId: merchant.id, merchantName: merchant.name, advOrderNo: o.advOrderNo, ruleId: rule.id });
           } else {
             release(merchant.id, o.advOrderNo, [rule.id]);
+            dg.lastError = `kirim: ${r?.error}`; dg.lastMatch.result = dg.lastError;
             console.error(`[autoreply] ${merchant.name} ${o.advOrderNo}: kirim gagal —`, r?.error);
           }
           await sleep(GAP_MS);
@@ -189,4 +210,4 @@ function start() {
 }
 function stop() { if (timer) clearInterval(timer); }
 
-module.exports = { start, stop };
+module.exports = { start, stop, status };
