@@ -133,6 +133,7 @@ async function getOrders(endpoint, params, apiKey, apiSecret, isQuick) {
 router.get('/:merchantId/market', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (req.query.fresh) bustQuick(merchant.id); // manual refresh: never serve the 3s snapshot
   try {
     const { side, orderDealState, startTime, endTime, quick } = req.query;
     const baseParams = { ...(side && { side }), ...(orderDealState && { orderDealState }) };

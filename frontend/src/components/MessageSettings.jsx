@@ -113,7 +113,7 @@ export default function MessageSettings() {
         <div className="flex gap-2">
           <select value={mid} onChange={e => setMid(e.target.value)} className={sel + ' flex-1 !py-2 !text-sm'}>
             {merchants.length === 0 && <option value="">— belum ada merchant —</option>}
-            {merchants.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {merchants.map(m => <option key={m.id} value={m.id}>{m.name} — {m.platform === 'bingx' ? 'BingX' : 'MEXC'}</option>)}
           </select>
           {merchants.length > 1 && (
             <button onClick={copyToAll} disabled={saving || !mid} title="Salin template merchant ini ke semua merchant lain"
@@ -166,6 +166,12 @@ export default function MessageSettings() {
               <p className="text-surface-200">siklus: {wstat.cycles} · terakhir {ago(wstat.lastCycleAt)} · interval {Math.round(wstat.intervalMs / 1000)}s · server hidup {Math.round(wstat.uptimeMs / 60000)} mnt</p>
               <p className="text-surface-200">order terlihat: {wstat.ordersSeen} (berjalan {wstat.running}) · aturan aktif: {wstat.rulesActive} · terkirim sejak restart: {wstat.sent}</p>
               {wstat.skipped && <p className="text-warning">dilewati: {wstat.skipped}</p>}
+              {wstat.skipped === 'belum ada aturan' && rules.length > 0 && (
+                <p className="text-sell">Aturan di layar ini BELUM tersimpan untuk merchant ini — klik "Save rules" di bawah.</p>
+              )}
+              {wstat.skipped === 'belum ada aturan' && rules.length === 0 && (
+                <p className="text-sell">Merchant ini tidak punya aturan. Tambahkan lewat "Add rule" lalu "Save rules", atau buka merchant lain dan pakai "Salin ke semua merchant".</p>
+              )}
               {!wstat.primed && wstat.cycles === 0 && <p className="text-surface-300">belum ada siklus untuk merchant ini (baru ditambah? tunggu ≤15 dtk)</p>}
               {wstat.lastMatch && (
                 <p className="text-surface-200">cocok terakhir: order …{String(wstat.lastMatch.advOrderNo).slice(-6)} aturan {wstat.lastMatch.rules.join(',')} ({wstat.lastMatch.isNew ? 'order baru' : `status ${wstat.lastMatch.prevState}→${wstat.lastMatch.state}`}) → <b className={wstat.lastMatch.result === 'terkirim' ? 'text-buy' : 'text-warning'}>{wstat.lastMatch.result || '…'}</b> · {ago(wstat.lastMatch.at)}</p>

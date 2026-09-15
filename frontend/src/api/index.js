@@ -47,7 +47,7 @@ export const adsApi = {
 export const ordersApi = {
   list: (mid, params) => api.get(`/orders/${mid}`, { params }),
   market: (mid, params) => api.get(`/orders/${mid}/market`, { params }),
-  marketQuick: (mid, params) => api.get(`/orders/${mid}/market`, { params: { ...params, quick: 'true' } }),
+  marketQuick: (mid, params, config = {}) => api.get(`/orders/${mid}/market`, { ...config, params: { ...params, quick: 'true' } }),
   detail: (mid, advOrderNo) => api.get(`/orders/${mid}/detail/${advOrderNo}`),
   memberIds: (mid, advOrderNos) => api.post(`/orders/${mid}/member-ids`, { advOrderNos }),
   captureStats: (mid, advOrderNos) => api.post(`/orders/${mid}/capture-stats`, { advOrderNos }),

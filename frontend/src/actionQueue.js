@@ -43,7 +43,10 @@ const MERCHANTS_TTL_MS = 60000; // re-read it every minute — a merchant added 
 let listeners = [];
 let timer = null;
 let inFlight = false;
+let inFlightSince = 0;
 let rerun = false;            // a refresh was requested while one was running → run again right after
+let forceNext = false;        // next pass bypasses the server's 3s cache (manual refresh)
+const STUCK_MS = 30000;       // a pass older than this is presumed hung (network) and abandoned
 let lastError = false;
 let lastSync = 0;
 let announcing = false;       // true while THIS poller announces, so its own broadcast doesn't re-trigger it
@@ -128,7 +131,7 @@ export function getActionableCount() { return actionableCount; }
 /** Running-order count per merchant — lets the dashboard badge every merchant
  *  chip so you can see where the activity is without opening each panel. */
 export function getActiveByMerchant() { return activeByMerchant; }
-export function getQueueMeta() { return { lastError, lastSync, merchants, buyerLogOn }; }
+export function getQueueMeta() { return { lastError, lastSync, merchants, buyerLogOn, inFlight }; }
 /** Permanent buyer-name index, shared so the queue page doesn't fetch its own. */
 export function getNameIndex() { return nameIndex; }
 /** Is the duplicate-name alert switched on for this merchant? */
@@ -138,9 +141,18 @@ export function isBuyerLogOn(mid) { return !!buyerLogOn[mid]; }
  *  poll picks the change up immediately instead of on the minute. */
 export function invalidateQueueMerchants() { merchantsAt = 0; }
 
-export async function refreshQueue() {
-  if (inFlight) { rerun = true; return; } // coalesce: one more pass after the current one
-  inFlight = true;
+export async function refreshQueue(opts = {}) {
+  const force = !!(opts && opts.force);
+  if (force) forceNext = true;
+  if (inFlight) {
+    // Coalesce: one more pass after the current one. A pass that has been
+    // "running" for half a minute is a hung request — abandon it, or the
+    // queue would be frozen until the browser gave up on the socket.
+    if (Date.now() - inFlightSince < STUCK_MS) { rerun = true; emit(); return; }
+  }
+  inFlight = true; inFlightSince = Date.now();
+  const fresh = forceNext; forceNext = false;
+  emit(); // spinner on
   try {
     // The list used to be fetched ONCE per tab. A BingX merchant added in
     // Settings therefore never got polled until a full page reload — its
@@ -174,7 +186,7 @@ export async function refreshQueue() {
         // polling, so this poller usually costs ZERO extra MEXC requests.
         // Actionable orders have minute-scale deadlines — the 24h quick
         // window always contains them.
-        const r = await ordersApi.marketQuick(m.id, { startTime: now - WINDOW_MS, endTime: now });
+        const r = await ordersApi.marketQuick(m.id, { startTime: now - WINDOW_MS, endTime: now, ...(fresh ? { fresh: 1 } : {}) }, { timeout: 20000 });
         const raw = r.data;
         const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
         const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name, platform: m.platform || o.platform || 'mexc' }));
@@ -225,6 +237,7 @@ export async function refreshQueue() {
   } finally {
     inFlight = false;
     announcing = false;
+    emit(); // spinner off
     if (rerun) { rerun = false; refreshQueue(); }
   }
 }

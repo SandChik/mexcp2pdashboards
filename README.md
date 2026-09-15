@@ -94,6 +94,12 @@ Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
 - Dashboard BingX v67: filter tanggal sama dengan MEXC (popover/sheet, preset,
   rentang khusus ≤ 8 hari) + preset event Senin→sekarang dan event minggu lalu
   (Senin s/d Minggu). Rentang > 3 hari membaca sampai 2.000 order.
+- v68: daftar cepat BingX dibangun dari view "semua order" (`type=0`), bukan
+  view "berjalan"/"selesai" yang terlihat tertinggal beberapa menit dari
+  aplikasi. Refresh manual di Antrian (tombol / G) memaksa baca ulang tanpa
+  cache 3 detik (`fresh=1`). Antrian: navigasi W/S, dialog konfirmasi
+  dikendalikan keyboard (Enter = ya, Esc = batal), shortcut halaman tidak
+  aktif saat dialog terbuka.
 - Yang **belum** ada untuk BingX: Catatan Buyer / FTD / UU. Worker capture
   sengaja melewati merchant BingX sampai jalurnya ada.
 - Logo (v66): `frontend/public/brand/` — BingX & MEXC di panel, nav, dan judul;

@@ -29,15 +29,20 @@ async function listPage(m, type, pageId, pageSize, priority = false) {
 }
 
 /**
- * Quick window (queue + panel polling): everything in progress plus the most
- * recent ended orders — the latter so a transition INTO done/cancelled is
- * announced instead of the order silently vanishing from the running list.
- * Two calls per cycle, shared by every poller through the route's 3s cache.
+ * Quick window (queue + panel polling).
+ *
+ * v68: the newest 100 orders from the ALL view (type=0) come first and win;
+ * the "in progress" view (type=1) only adds running orders that have already
+ * dropped out of the newest 100 (long-lived appeals). Before this the quick
+ * list was built from type=1 + type=4, and in production those filtered views
+ * were observed to trail the app by minutes while a manual refresh — which
+ * reads type=0 — was current. Two calls per cycle, shared by every poller
+ * through the route's 3s cache.
  */
 async function fetchQuick(m) {
-  const [running, ended] = await Promise.all([listPage(m, 1, 0, 100), listPage(m, 4, 0, 20)]);
+  const [all, running] = await Promise.all([listPage(m, 0, 0, 100), listPage(m, 1, 0, 100)]);
   const seen = new Set();
-  return running.items.concat(ended.items)
+  return all.items.concat(running.items)
     .filter(o => (seen.has(o.advOrderNo) ? false : (seen.add(o.advOrderNo), true)))
     .sort((a, b) => (b.createTime || 0) - (a.createTime || 0));
 }

@@ -129,19 +129,20 @@ export default function ActionQueue() {
   useEffect(() => {
     const onKey = (e) => {
       if (detailOrder) return;
+      if (document.querySelector('[data-confirm-open]')) return; // the dialog owns the keyboard
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
       const k = e.key.toLowerCase();
       if (k === '?') { setShowKeys(s => !s); return; }
       if (k === 'escape') { setShowKeys(false); return; }
       if (items.length === 0) return;
-      if (k === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(items.length - 1, c + 1)); }
-      else if (k === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(0, c - 1)); }
+      if (k === 's' || e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(items.length - 1, c + 1)); }
+      else if (k === 'w' || e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(0, c - 1)); }
       else if (k === 'r' && actionFor(items[cursor]) === 'release') { e.preventDefault(); act(items[cursor]); }
       else if (k === 'c' && actionFor(items[cursor]) === 'confirm') { e.preventDefault(); act(items[cursor]); }
       else if (e.key === 'Enter' && actionFor(items[cursor])) { e.preventDefault(); act(items[cursor]); }
       else if (k === 'd') { e.preventDefault(); setDetailOrder(items[cursor]); }
-      else if (k === 'g') { e.preventDefault(); refreshQueue(); }
+      else if (k === 'g') { e.preventDefault(); refreshQueue({ force: true }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -186,15 +187,15 @@ export default function ActionQueue() {
             className="hidden md:flex w-8 h-8 items-center justify-center text-surface-300 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg transition-colors">
             <Keyboard size={14} />
           </button>
-          <button onClick={refreshQueue} title="Refresh (G)"
+          <button onClick={() => refreshQueue({ force: true })} title="Refresh (G) — langsung ke bursa, tanpa cache"
             className="w-8 h-8 flex items-center justify-center text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg transition-colors">
-            <RefreshCw size={14} />
+            <RefreshCw size={14} className={meta.inFlight ? 'animate-spin text-brand-300' : ''} />
           </button>
         </header>
 
         {showKeys && (
           <div className="hidden md:flex flex-wrap gap-x-5 gap-y-1 px-4 py-2 border-b border-surface-700 bg-surface-900 text-[11px] text-surface-300">
-            {[['J / ↓', 'turun'], ['K / ↑', 'naik'], ['R', 'release'], ['C', 'konfirmasi bayar'], ['Enter', 'jalankan aksi'], ['D', 'buka chat'], ['G', 'refresh'], ['?', 'tutup bantuan']].map(([k, d]) => (
+            {[['W / ↑', 'naik'], ['S / ↓', 'turun'], ['R', 'release'], ['C', 'konfirmasi bayar'], ['Enter', 'jalankan aksi'], ['Enter / Esc', 'ya / batal di dialog'], ['D', 'buka chat'], ['G', 'refresh'], ['?', 'tutup bantuan']].map(([k, d]) => (
               <span key={k}><kbd className="font-mono text-surface-100 bg-surface-800 border border-surface-700 rounded px-1.5 py-0.5">{k}</kbd> {d}</span>
             ))}
           </div>
