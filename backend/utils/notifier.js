@@ -61,6 +61,20 @@ function publicSettings() {
 }
 
 // ── VAPID ───────────────────────────────────────────────────────────
+// Apple's push service validates the VAPID `sub` claim strictly and answers
+// 403 {"reason":"BadJwtToken"} when it dislikes it (seen with a mailto: on a
+// made-up .local domain). Chrome/FCM never cared. So the subject sent to each
+// device is the HTTPS origin the device subscribed FROM — always a real,
+// valid URL — with an env override for anyone who wants a contact address.
+const DEFAULT_SUBJECT = process.env.NOTIFY_VAPID_SUBJECT || 'https://sandchik-p2p.invalid';
+function subjectFor(sub) {
+  if (process.env.NOTIFY_VAPID_SUBJECT) return process.env.NOTIFY_VAPID_SUBJECT;
+  if (sub && /^https:\/\//.test(sub.origin || '')) return sub.origin;
+  // Devices subscribed before origins were recorded: borrow the origin any
+  // other device used — it is the same dashboard.
+  const known = listSubs().map(x => x.origin).find(o => /^https:\/\//.test(o || ''));
+  return known || DEFAULT_SUBJECT;
+}
 function vapid() {
   if (!webpush) return null;
   let k = readJson(VAPID_PATH, null);
@@ -69,7 +83,7 @@ function vapid() {
     try { fs.mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 }); fs.writeFileSync(VAPID_PATH, JSON.stringify(k), { mode: 0o600 }); }
     catch (e) { console.error('[notify] cannot persist VAPID keys:', e.message); }
   }
-  webpush.setVapidDetails('mailto:ops@sandchik.local', k.publicKey, k.privateKey);
+  webpush.setVapidDetails(DEFAULT_SUBJECT, k.publicKey, k.privateKey);
   return k;
 }
 
@@ -77,7 +91,7 @@ function vapid() {
 function listSubs() { return readJson(SUBS_PATH, []); }
 function addSub(sub, meta = {}) {
   const subs = listSubs().filter(s => s.endpoint !== sub.endpoint);
-  const rec = { id: crypto.createHash('sha1').update(sub.endpoint).digest('hex').slice(0, 12), endpoint: sub.endpoint, keys: sub.keys, ua: meta.ua || '', label: meta.label || '', createdAt: Date.now(), lastOkAt: null, fails: 0 };
+  const rec = { id: crypto.createHash('sha1').update(sub.endpoint).digest('hex').slice(0, 12), endpoint: sub.endpoint, keys: sub.keys, ua: meta.ua || '', label: meta.label || '', origin: meta.origin || '', createdAt: Date.now(), lastOkAt: null, fails: 0 };
   subs.push(rec); writeJson(SUBS_PATH, subs); return rec;
 }
 function removeSub(endpointOrId) {
@@ -98,7 +112,10 @@ async function pushAll(payload) {
   let sent = 0, failed = 0; const body = JSON.stringify(payload);
   for (const s of subs) {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, body, { TTL: 600, urgency: 'high' });
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, body, {
+        TTL: 600, urgency: 'high',
+        vapidDetails: { subject: subjectFor(s), publicKey: k.publicKey, privateKey: k.privateKey },
+      });
       s.lastOkAt = Date.now(); s.fails = 0; sent++;
     } catch (e) {
       failed++;

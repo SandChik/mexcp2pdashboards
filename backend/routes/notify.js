@@ -29,7 +29,11 @@ router.post('/settings', authMiddleware, (req, res) => {
 router.post('/subscribe', authMiddleware, (req, res) => {
   const sub = req.body.subscription;
   if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ error: 'subscription tidak valid' });
-  const rec = notifier.addSub(sub, { ua: String(req.headers['user-agent'] || '').slice(0, 120), label: String(req.body.label || '').slice(0, 60) });
+  // The HTTPS origin the device subscribed from doubles as the VAPID subject
+  // for that device (Apple rejects made-up mailto: subjects with BadJwtToken).
+  let origin = String(req.headers.origin || '');
+  if (!origin && req.headers.referer) { try { origin = new URL(req.headers.referer).origin; } catch { origin = ''; } }
+  const rec = notifier.addSub(sub, { ua: String(req.headers['user-agent'] || '').slice(0, 120), label: String(req.body.label || '').slice(0, 60), origin });
   res.json({ success: true, id: rec.id });
 });
 router.post('/unsubscribe', authMiddleware, (req, res) => {

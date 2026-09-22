@@ -173,6 +173,12 @@ Status BingX yang tidak dikenal adapter (bukan 1/4/5/2/3/6) kini tampil
 sebagai "Status ?" (state 10) dengan angka mentahnya, bukan hilang — supaya
 banding yang dilaporkan BingX dengan kode lain tetap terlihat.
 
+v72: Apple (iPhone) menolak JWT VAPID dengan `403 BadJwtToken` bila `sub`-nya
+alamat mailto rekaan — sekarang tiap perangkat dikirimi `sub` = origin HTTPS
+tempat ia mendaftar (mis. `https://vm-0-9-ubuntu.tail32cc17.ts.net`).
+Perangkat yang mendaftar sebelum v72: Matikan lalu Aktifkan lagi sekali.
+Env `NOTIFY_VAPID_SUBJECT` untuk memaksa nilai lain.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 
