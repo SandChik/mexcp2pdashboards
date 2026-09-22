@@ -327,3 +327,7 @@ router.get('/:merchantId/ftd-stats', authMiddleware, (req, res) => {
 });
 
 module.exports = router;
+// The server-side notifier polls through the same cached quick path the UI
+// uses (platform dispatch included), so it costs no extra exchange calls
+// while any browser is open and at most one quick fetch per 3s otherwise.
+module.exports.quickOrders = (merchant) => getOrdersCached('/api/v3/fiat/market/order/pagination', {}, merchant, true);

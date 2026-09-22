@@ -11,7 +11,8 @@ w.fetch = async () => ({ ok:true, json: async () => ({ version:'test' }) });
 const reply = (url) => {
   if (url.includes('/api/merchants') && url.endsWith('/settings')) return { buyerLog:true, autoReplyEnabled:true, quickReplies:[], autoReplyRules:[] };
   if (url.includes('/api/merchants/') && url.includes('/pause')) return { ads: [] };
-  if (url.includes('/api/merchants')) return [{ id:'m1', name:'Test Merchant', platform:'mexc' }, { id:'b1', name:'Test BingX', platform:'bingx' }];
+  if (url.includes('/api/notify')) return { webPush: true, publicKey: 'x', subscriptions: [], events: { newOrder: { label: 'Order baru' } }, settings: { events: { newOrder: true }, telegram: { enabled: false, botToken: '', chatId: '' } }, recent: [], watcher: { on: true, intervalMs: 10000, cycles: 1, emitted: 0 } };
+    if (url.includes('/api/merchants')) return [{ id:'m1', name:'Test Merchant', platform:'mexc' }, { id:'b1', name:'Test BingX', platform:'bingx' }];
   if (url.includes('/api/orders') && url.includes('member-ids')) return { map:{} };
   if (url.includes('/api/orders')) return { code:0, data:[] };
   if (url.includes('/api/ads')) return { code:0, data:[] };

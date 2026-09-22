@@ -1,0 +1,15 @@
+{
+  "name": "SandChik P2P Dashboard",
+  "short_name": "SandChik P2P",
+  "description": "Dashboard order P2P MEXC & BingX",
+  "start_url": "/queue",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

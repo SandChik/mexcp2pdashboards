@@ -23,7 +23,7 @@ import { actionFor } from './actions';
 
 const POLL_MS = 5000; // same cadence as the panels; they share the server's 3s cache, so this is nearly free
 const WINDOW_MS = 86400000; // 24h — running orders are minutes old, never days
-const RUNNING = [0, 1, 2, 3, 9];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING, + BANDING (BingX appeal)
+const RUNNING = [0, 1, 2, 3, 9, 10];  // NOT_PAID, PAID, WAIT_PROCESS, PROCESSING, + BANDING (BingX appeal), + unknown BingX status
                                // 4..8 (DONE/CANCEL/INVALID/REFUSE/TIMEOUT) are
                                // finished and deliberately excluded — this is a
                                // work list, not a history page.

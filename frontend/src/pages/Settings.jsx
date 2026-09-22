@@ -3,6 +3,7 @@ import { merchantApi, authApi } from '../api';
 import Layout from '../components/Layout';
 import MessageSettings from '../components/MessageSettings';
 import SoundSettings from '../components/SoundSettings';
+import NotifySettings from '../components/NotifySettings';
 import VersionInfo from '../components/VersionInfo';
 import { Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Key, Activity, CheckCircle2, XCircle } from 'lucide-react';
 import { PlatformBadge, PLATFORMS } from '../components/helpers';
@@ -352,6 +353,8 @@ export default function Settings() {
           <ChangePasswordSection />
 
           {/* Info */}
+          <NotifySettings />
+
           <MessageSettings />
 
           <SoundSettings />

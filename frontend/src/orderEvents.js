@@ -16,7 +16,7 @@ import { ORDER_STATES } from './components/helpers';
  * claims it and the other stays quiet. That also holds across browser tabs.
  */
 
-const RUNNING = [0, 1, 2, 3, 9]; // 9 = Banding (BingX appeal), still unresolved
+const RUNNING = [0, 1, 2, 3, 9, 10]; // 9 = Banding (BingX appeal), 10 = unknown BingX status — both unresolved
 
 /**
  * @param opts.merchantId    used in the event id — keeps merchants independent

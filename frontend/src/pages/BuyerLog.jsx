@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { copyToClipboard } from '../clipboard';
 import { merchantApi, registryApi } from '../api';
 import Layout from '../components/Layout';
 import { downloadCsv, stamp } from '../csv';
@@ -207,7 +208,7 @@ export default function BuyerLog() {
                     <td className="px-4 py-2 text-surface-200 font-mono text-xs">{fmtDate(r.doneAt)}</td>
                     <td className="px-4 py-2 text-right font-mono text-surface-50">{formatAmount(r.amount, 0)} <span className="text-surface-300 text-xs">{r.fiatUnit}</span></td>
                     <td className="px-4 py-2">
-                      <button onClick={() => { navigator.clipboard.writeText(r.advOrderNo); toast.success('Order no disalin'); }}
+                      <button onClick={() => copyToClipboard(r.advOrderNo, 'No. order')}
                         title={r.advOrderNo} className="flex items-center gap-1 text-[11px] font-mono text-surface-300 hover:text-brand-400 transition-colors">
                         <Copy size={11} /> {String(r.advOrderNo).slice(-8)}
                       </button>

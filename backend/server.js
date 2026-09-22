@@ -36,6 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/merchants', merchantRoutes);
+app.use('/api/notify', require('./routes/notify'));
 app.use('/api/ads', adsRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/chat', chatRoutes);
@@ -46,7 +47,7 @@ app.use('/api/autoreply', autoreplyRoutes);
 // Single source of truth for "what is actually running". Shown in Settings and
 // printed at boot, so a stale build can be spotted in seconds instead of by
 // grepping source files on the server.
-const APP_VERSION = 'v68';
+const APP_VERSION = 'v71';
 app.get('/health', (req, res) => res.json({ status: 'ok', version: APP_VERSION, timestamp: Date.now() }));
 
 // Optionally serve the built frontend (frontend/dist) from this same process,
@@ -73,4 +74,6 @@ app.listen(PORT, HOST, () => {
   // Auto-reply now runs here instead of in the browser: one sender, always on,
   // unaffected by a phone tab going to sleep. AUTO_REPLY_WORKER=0 to disable.
   require('./utils/autoReplyWorker').start();
+  // Order watcher → Web Push / Telegram. NOTIFY_WATCHER=0 to disable.
+  if (process.env.NOTIFY_WATCHER !== '0') require('./utils/orderWatcher').start();
 });

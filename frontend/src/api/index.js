@@ -33,6 +33,16 @@ export const merchantApi = {
   autoReplyStatus: (id) => api.get(`/merchants/${id}/auto-reply-status`)
 };
 
+export const notifyApi = {
+  status: () => api.get('/notify'),
+  saveSettings: (patch) => api.post('/notify/settings', patch),
+  subscribe: (subscription, label) => api.post('/notify/subscribe', { subscription, label }),
+  unsubscribe: (endpoint) => api.post('/notify/unsubscribe', { endpoint }),
+  test: () => api.post('/notify/test'),
+  telegramDetect: (botToken) => api.post('/notify/telegram/detect', { botToken }),
+  telegramTest: (botToken, chatId) => api.post('/notify/telegram/test', { botToken, chatId }),
+};
+
 export const adsApi = {
   list: (mid, params) => api.get(`/ads/${mid}`, { params }),
   market: (mid, params) => api.get(`/ads/${mid}/market`, { params }),

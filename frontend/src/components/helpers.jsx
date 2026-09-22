@@ -3,7 +3,8 @@ export const BANK_MAP = {
   176: 'SeaBank', 456: 'BCA', 459: 'OVO', 460: 'GoPay',
   463: 'ShopeePay', 469: 'DANA', 455: 'Blu BCA', 462: 'Allo Bank',
   465: 'CIMB Niaga', 461: 'Bank Jago', 452: 'BRI', 454: 'Permata',
-  457: 'Mandiri', 569: 'Bank Transfer', 458: 'BNI', 738: 'Superbank'
+  457: 'Mandiri', 569: 'Bank Transfer', 458: 'BNI', 738: 'Superbank',
+  740: 'Bank Mandiri', // new MEXC id seen Sep 2026 (457 is the older Mandiri entry)
 };
 
 export function getBankName(payMethod) {
@@ -71,6 +72,7 @@ export const ORDER_STATES = {
   // 9 exists only for BingX (orderStatus 6 = appeal). It is still running —
   // the money question is unresolved — but never actionable from here.
   9: { label: 'Banding',     color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
+  10: { label: 'Status ?',   color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' }, // BingX code the adapter doesn't know
 };
 
 export const KYC_LABELS = { 0: 'None', 1: 'Primary', 2: 'Advanced' };

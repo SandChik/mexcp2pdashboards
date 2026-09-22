@@ -25,11 +25,15 @@
  */
 
 const STATE_MAP = { 1: 0, 4: 1, 5: 4, 2: 5, 3: 8, 6: 9 };
-const RUNNING_HOUSE = new Set([0, 1, 2, 3, 9]);
+const RUNNING_HOUSE = new Set([0, 1, 2, 3, 9, 10]);
 
+// A status the map doesn't know used to become -1, and -1 is in no list —
+// the order simply vanished from the panel and the queue. It now becomes 10
+// ("status tak dikenal"), shown as active with the raw BingX number, so an
+// appeal that BingX reports under some other code still surfaces.
 function houseState(orderStatus) {
   const n = Number(orderStatus);
-  return Object.prototype.hasOwnProperty.call(STATE_MAP, n) ? STATE_MAP[n] : -1;
+  return Object.prototype.hasOwnProperty.call(STATE_MAP, n) ? STATE_MAP[n] : 10;
 }
 function sideOf(tradeType) { return Number(tradeType) === 1 ? 'BUY' : 'SELL'; }
 function invert(side) { return side === 'BUY' ? 'SELL' : 'BUY'; }

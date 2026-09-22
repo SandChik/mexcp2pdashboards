@@ -28,11 +28,11 @@ import toast from 'react-hot-toast';
 
 const ORDER_FILTERS = [
   { key: 'all',       label: 'Semua',   states: null },
-  { key: 'active',    label: 'Aktif',   states: [0, 1, 2, 3, 9] },
+  { key: 'active',    label: 'Aktif',   states: [0, 1, 2, 3, 9, 10] },
   { key: 'done',      label: 'Selesai', states: [4] },
   { key: 'cancelled', label: 'Batal',   states: [5, 6, 7, 8] },
 ];
-const RUNNING = [0, 1, 2, 3, 9];
+const RUNNING = [0, 1, 2, 3, 9, 10];
 
 function fmtRemaining(ms) {
   if (ms <= 0) return null;

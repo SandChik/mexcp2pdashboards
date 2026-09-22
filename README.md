@@ -100,6 +100,16 @@ Settings → pilih BingX). Batas: 5 merchant MEXC + 2 merchant BingX.
   cache 3 detik (`fresh=1`). Antrian: navigasi W/S, dialog konfirmasi
   dikendalikan keyboard (Enter = ya, Esc = batal), shortcut halaman tidak
   aktif saat dialog terbuka.
+- v70: salin (rekening, nominal, no. order) bekerja juga saat dashboard dibuka
+  lewat http:// (Tailscale/LAN) — `navigator.clipboard` hanya ada di HTTPS/
+  localhost, jadi tombol salin dulu gagal diam-diam; sekarang ada jalur cadangan
+  dan selalu ada notif berhasil/gagal. Nominal disalin sebagai angka bulat.
+  ID metode MEXC 740 = Bank Mandiri.
+- v69: **bug auto-reply yang sebenarnya.** Layar Settings menampilkan 5 aturan
+  bawaan untuk merchant yang belum pernah menekan "Save rules", tapi worker
+  membaca berkas mentah dan mendapat 0 aturan — jadi merchant baru (BingX)
+  terlihat aktif tapi tidak pernah membalas. Defaults sekarang satu sumber
+  (`utils/merchantSettings.js`) dan worker menjalankan persis yang ditampilkan.
 - Yang **belum** ada untuk BingX: Catatan Buyer / FTD / UU. Worker capture
   sengaja melewati merchant BingX sampai jalurnya ada.
 - Logo (v66): `frontend/public/brand/` — BingX & MEXC di panel, nav, dan judul;
@@ -129,6 +139,39 @@ Sebelum mengandalkan merchant BingX baru: Settings → **Tes koneksi**.
 Skrip pemeriksa mandiri: `backend/scripts/bingx-probe.js`
 (`BINGX_KEY=xxx BINGX_SECRET=yyy npm run bingx:probe` dari folder `backend`).
 Key & secret hanya lewat environment — jangan ditulis ke file di repo.
+
+## Notifikasi (v71)
+
+Pemantau di server (`backend/utils/orderWatcher.js`, tiap 10 detik, memakai
+cache yang sama dengan browser) mengubah perubahan order menjadi notifikasi:
+order baru, buyer sudah bayar, pesan chat masuk, batal/timeout, banding /
+status tak dikenal, selesai (mati bawaan). Diatur di Settings → Notifikasi.
+
+Dua jalur:
+- **Telegram bot** — tidak butuh HTTPS. Panduan bikin bot ada di layar
+  Settings (BotFather → token → tekan Start di bot → "Deteksi" chat id).
+- **Web Push (browser)** — notifikasi sistem di desktop & Android, iPhone hanya
+  lewat Home Screen (Bagikan → Add to Home Screen, iOS 16.4+). **Wajib HTTPS.**
+  Kunci VAPID dibuat otomatis di `~/.mexc-dashboard/vapid.json` (di luar repo),
+  langganan perangkat di `backend/data/push-subscriptions.json`.
+
+HTTPS termudah (tanpa domain), sekali saja di VPS:
+
+```bash
+# 1. di admin Tailscale: DNS → MagicDNS ON, HTTPS Certificates → Enable
+# 2. di VPS:
+sudo tailscale serve --bg 3001
+tailscale serve status        # menampilkan https://<nama-mesin>.<tailnet>.ts.net
+```
+
+Buka dashboard lewat alamat `https://…ts.net` itu, lalu Settings → Notifikasi →
+"Aktifkan di perangkat ini" (dari klik, browser akan minta izin). Alamat
+`http://` lama tetap jalan untuk yang lain. Env: `NOTIFY_WATCHER=0` mematikan
+pemantau, `NOTIFY_INTERVAL_MS` mengubah jaraknya (min 5000).
+
+Status BingX yang tidak dikenal adapter (bukan 1/4/5/2/3/6) kini tampil
+sebagai "Status ?" (state 10) dengan angka mentahnya, bukan hilang — supaya
+banding yang dilaporkan BingX dengan kode lain tetap terlihat.
 
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).

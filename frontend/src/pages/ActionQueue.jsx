@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { copyToClipboard } from '../clipboard';
 import Layout from '../components/Layout';
 import OrderDetailModal from '../components/OrderDetailModal';
 import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge, PlatformBadge, platformOf } from '../components/helpers';
@@ -124,7 +125,7 @@ export default function ActionQueue() {
     } finally { setBusy(null); }
   }, [busy]);
 
-  const copy = (v, label) => { navigator.clipboard.writeText(String(v)); toast.success(`${label} disalin`, { duration: 1200 }); };
+  const copy = (v, label) => copyToClipboard(v, label); // works on http:// too, always toasts
 
   useEffect(() => {
     const onKey = (e) => {
@@ -280,7 +281,7 @@ export default function ActionQueue() {
                       <p className={`font-mono font-semibold tnum leading-none text-surface-50 ${waiting ? 'text-lg sm:text-xl' : 'text-2xl sm:text-3xl'}`}>
                         {formatAmount(o.amount, 0)}
                         <span className="text-xs text-surface-300 font-sans font-normal ml-1.5">{o.fiatUnit}</span>
-                        <button onClick={() => copy(o.amount, 'Nominal')} title="Salin nominal"
+                        <button onClick={() => copy(String(Math.round(parseFloat(o.amount) || 0)), 'Nominal')} title="Salin nominal (angka bulat, tanpa desimal)"
                           className="ml-1.5 align-middle text-surface-300 hover:text-brand-300 transition-colors"><Copy size={12} /></button>
                       </p>
 
@@ -311,7 +312,7 @@ export default function ActionQueue() {
                       // then explaining why nothing happened.
                       <div className="flex-shrink-0 flex items-center justify-center gap-1.5 text-xs text-surface-300 rounded-lg px-3 sm:px-4 h-11 min-w-[104px] sm:min-w-[132px] border border-dashed border-surface-700 text-center leading-tight">
                         <Hourglass size={13} className="flex-shrink-0" />
-                        {o._state === 9 ? 'Banding — tangani di BingX' : o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
+                        {o._state === 9 ? 'Banding — tangani di BingX' : o._state === 10 ? `Status BingX ${o._bingx?.orderStatus ?? '?'} — buka Raw` : o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
                       </div>
                     ) : (
                       <button onClick={() => act(o)} disabled={!!busy}

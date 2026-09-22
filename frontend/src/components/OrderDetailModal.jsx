@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { copyToClipboard } from '../clipboard';
 import { X, Send, CheckCircle, Coins, RefreshCw, Wifi, WifiOff, AlertCircle, Copy, Image, Paperclip } from 'lucide-react';
 import { ordersApi, chatApi, merchantApi } from '../api';
 import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, KYC_LABELS, getBankName, PlatformBadge } from './helpers';
@@ -231,10 +232,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
     finally { setActionLoading(''); }
   }
 
-  function copyText(text) {
-    navigator.clipboard.writeText(String(text));
-    toast.success('Copied!', { duration: 1500 });
-  }
+  function copyText(text, label = 'Teks') { copyToClipboard(text, label); }
 
   if (loading) return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
@@ -269,7 +267,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b-2 border-surface-700 bg-surface-900">
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <button onClick={() => copyText(advOrderNo)} className="font-mono text-xs text-surface-200/40 hover:text-surface-200 truncate hidden sm:block transition-colors" title="Copy order no">
+            <button onClick={() => copyText(advOrderNo, 'No. order')} className="font-mono text-xs text-surface-200/40 hover:text-surface-200 truncate hidden sm:block transition-colors" title="Copy order no">
               {advOrderNo}
             </button>
             {isBingx && <PlatformBadge platform="bingx" />}
@@ -374,7 +372,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-white font-mono">{override || `${formatAmount(val, dec)} ${unit||''}`}</p>
                       {copyable && val && (
-                        <button onClick={() => copyText(val)} className="text-surface-200/30 hover:text-brand-400 ml-2 transition-colors" title="Copy">
+                        <button onClick={() => copyText(val, k)} className="text-surface-200/30 hover:text-brand-400 ml-2 transition-colors" title="Copy">
                           <Copy size={12} />
                         </button>
                       )}
@@ -397,7 +395,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                     <div key={i} className="bg-surface-800 rounded-lg p-3 space-y-1.5 text-sm">
                       <Row label="Metode" value={getBankName(p.payMethod)} />
                       {p.bankName && <Row label="Bank" value={p.bankName} />}
-                      {p.account && <Row label="Akun" value={p.account} copy onCopy={copyText} />}
+                      {p.account && <Row label="Akun" value={p.account} copy onCopy={v => copyText(v, 'No. rekening')} />}
                       {p.bankAddress && <Row label="Branch" value={p.bankAddress} />}
                       {p.payee && <Row label="Penerima" value={p.payee} />}
                     </div>
@@ -411,7 +409,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                   <div className="bg-surface-800 rounded-lg p-3 space-y-1.5 text-sm">
                     <Row label="Metode" value={getBankName(order.confirmPaymentInfo.payMethod)} />
                     {order.confirmPaymentInfo.bankName && <Row label="Bank" value={order.confirmPaymentInfo.bankName} />}
-                    {order.confirmPaymentInfo.account && <Row label="Akun" value={order.confirmPaymentInfo.account} copy onCopy={copyText} />}
+                    {order.confirmPaymentInfo.account && <Row label="Akun" value={order.confirmPaymentInfo.account} copy onCopy={v => copyText(v, 'No. rekening')} />}
                     {order.confirmPaymentInfo.payee && <Row label="Penerima" value={order.confirmPaymentInfo.payee} />}
                     <Row label="Pay ID" value={order.confirmPaymentInfo.id} />
                   </div>

@@ -28,7 +28,7 @@ const bxChat = require('./bingxChat');
  */
 
 const STATE_PATH = path.join(__dirname, '../data/order-states.json');
-const SETTINGS_PATH = path.join(__dirname, '../data/merchant-settings.json');
+const { readSettings: readMerchantSettings, effectiveSettings } = require('./merchantSettings');
 const INTERVAL_MS = Math.max(10000, Number(process.env.AUTO_REPLY_INTERVAL_MS) || 15000);
 const GAP_MS = 900;           // spacing between two messages to the same buyer
 const MAX_PER_CYCLE = 12;     // hard ceiling: a bug can never fan out unbounded
@@ -112,7 +112,8 @@ async function cycle() {
     for (const merchant of merchants) {
       const dg = d(merchant.id);
       dg.cycles++; dg.lastCycleAt = Date.now(); dg.skipped = null;
-      const cfg = settings[merchant.id] || {};
+      // Defaults filled in — the same rules the Settings screen shows as active.
+      const cfg = effectiveSettings(settings, merchant.id);
       if (cfg.autoReplyEnabled === false) { dg.skipped = 'auto-reply OFF untuk merchant ini'; continue; }
       const rules = Array.isArray(cfg.autoReplyRules) ? cfg.autoReplyRules : [];
       dg.rulesActive = rules.filter(r => r.message && r.message.trim()).length;
@@ -200,7 +201,7 @@ async function cycle() {
   }
 }
 
-function readSettingsSafe() { return readJson(SETTINGS_PATH); }
+function readSettingsSafe() { return readMerchantSettings(); }
 
 function start() {
   if (process.env.AUTO_REPLY_WORKER === '0') { console.log('[autoreply] dimatikan via AUTO_REPLY_WORKER=0'); return; }

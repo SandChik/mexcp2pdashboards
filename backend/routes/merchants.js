@@ -11,27 +11,9 @@ const PAUSE_PATH = path.join(__dirname, '../data/paused.json');
 function readPause() { try { return JSON.parse(fs.readFileSync(PAUSE_PATH, 'utf8')); } catch { return {}; } }
 function writePause(o) { fs.writeFileSync(PAUSE_PATH, JSON.stringify(o, null, 2)); }
 
-const SETTINGS_PATH = path.join(__dirname, '../data/merchant-settings.json');
-function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); } catch { return {}; } }
-function writeSettings(o) { try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(o, null, 2)); } catch {} }
-// Per-merchant dashboard settings. buyerLog replaces the old realNameAlert:
-// when ON, every completed order's buyer is recorded permanently and duplicate
-// KYC names raise an alert. Auto-reply rules & quick replies are ALSO stored
-// here so each merchant has its own message set (no longer global/localStorage).
-const DEFAULT_QUICK = [
-  'Dana sudah kami terima, pesanan sedang diproses ya kak \ud83d\ude4f',
-  'Mohon kirim bukti transfernya ya kak',
-  'Berita / catatan transfer WAJIB dikosongkan ya kak',
-  'Pesanan selesai, terima kasih! Mohon review positifnya ya kak \ud83d\ude4f',
-];
-const DEFAULT_RULES = [
-  { id: 'sellUnpaid', side: 'SELL', state: 0, message: 'Halo kak \ud83d\udc4b Pesanan sudah kami terima. Silakan lanjut ke proses pembayaran ya, lalu kirim bukti transfernya. Terima kasih \ud83d\ude4f' },
-  { id: 'sellDone', side: 'SELL', state: 4, message: 'Pesanan selesai \ud83c\udf89 Terima kasih sudah bertransaksi, kak. Jika berkenan, mohon tinggalkan review positif ya \ud83d\ude4f' },
-  { id: 'buyUnpaid', side: 'BUY', state: 0, message: 'Halo kak \ud83d\udc4b Pembayaran sedang kami proses, mohon ditunggu sebentar ya. Terima kasih \ud83d\ude4f' },
-  { id: 'buyPaid', side: 'BUY', state: 1, message: 'Transfer sudah kami lakukan \u2705 Mohon dicek dan segera release koinnya ya kak. Terima kasih \ud83d\ude4f' },
-  { id: 'buyDone', side: 'BUY', state: 4, message: 'Pesanan selesai \ud83c\udf89 Terima kasih sudah bertransaksi, kak. Jika berkenan, mohon tinggalkan review positif ya \ud83d\ude4f' },
-];
-const DEFAULT_SETTINGS = { buyerLog: false, autoReplyEnabled: true, autoReplyRules: DEFAULT_RULES, quickReplies: DEFAULT_QUICK };
+// Settings storage + defaults live in utils/merchantSettings.js so the worker
+// runs exactly what the UI shows.
+const { DEFAULT_SETTINGS, readSettings, writeSettings, effectiveSettings } = require('../utils/merchantSettings');
 
 const router = express.Router();
 
@@ -163,7 +145,7 @@ router.get('/:id/auto-reply-status', authMiddleware, (req, res) => {
 
 // GET /api/merchants/:id/settings — per-merchant dashboard settings
 router.get('/:id/settings', authMiddleware, (req, res) => {
-  res.json({ ...DEFAULT_SETTINGS, ...(readSettings()[req.params.id] || {}) });
+  res.json(effectiveSettings(readSettings(), req.params.id));
 });
 
 // POST /api/merchants/:id/settings — update per-merchant settings
