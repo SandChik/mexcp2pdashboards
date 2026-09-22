@@ -1,6 +1,18 @@
 const { readConfig, getMerchant } = require('./store');
 const notifier = require('./notifier');
 
+// MEXC reports state as text ("NOT_PAID", "PAID", …), BingX (via the adapter)
+// as a number. Number("PAID") is NaN — which is exactly why MEXC orders never
+// produced a single event in v71 while BingX did. Same map as captureCore.
+function normState(s) {
+  if (s === null || s === undefined) return -1;
+  if (typeof s === 'number') return s;
+  const n = parseInt(s, 10);
+  if (!isNaN(n)) return n;
+  const map = { NOT_PAID: 0, PAID: 1, WAIT_PROCESS: 2, PROCESSING: 3, DONE: 4, CANCEL: 5, CANCELLED: 5, INVALID: 6, REFUSE: 7, TIMEOUT: 8, APPEAL: 9, BANDING: 9 };
+  return map[String(s).toUpperCase()] ?? -1;
+}
+
 /**
  * Order watcher — the server-side eye that feeds notifications.
  *
@@ -39,7 +51,7 @@ async function cycle() {
       let list;
       try { list = await quickOrders(m); }
       catch (e) { diag.lastError = `${m.name}: ${e.response?.data?.msg || e.bingx?.msg || e.message}`; continue; }
-      const orders = (Array.isArray(list) ? list : []).map(o => ({ ...o, _state: Number(o.state) }));
+      const orders = (Array.isArray(list) ? list : []).map(o => ({ ...o, _state: normState(o.state) }));
       const before = prev[m.id] || {};
       const after = {};
       orders.forEach(o => { after[o.advOrderNo] = { state: o._state, unread: Number(o.unreadCount) || 0 }; });

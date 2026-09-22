@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
+const { bankName } = require('./bankMap');
 let webpush = null;
 try { webpush = require('web-push'); } catch { /* dependency missing → web push disabled, Telegram still works */ }
 
@@ -155,39 +156,98 @@ async function telegramDetectChat(botToken) {
   }
 }
 
-const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-const fmtIdr = (n) => { const v = Math.round(parseFloat(n) || 0); return v.toLocaleString('id-ID'); };
+const esc = (v) => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const fmtFiat = (n, unit) => {
+  const v = Math.round(parseFloat(n) || 0).toLocaleString('id-ID');
+  return (unit || 'IDR') === 'IDR' ? `Rp ${v}` : `${v} ${unit}`;
+};
+const fmtUsdt = (n) => `${(parseFloat(n) || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
 
-/** Build the human text for an event. `o` is a house-shaped order. */
-function compose(ev) {
+// ── Detail enrichment ───────────────────────────────────────────────
+// The list row has nickname + amounts; the KYC name and the receiving account
+// only live in the order detail. One fetch per order, cached 15 minutes, so
+// "new → paid → done" costs one detail call, not three.
+const detailCache = new Map(); // `${mid}:${orderNo}` -> { at, info }
+async function enrich(merchant, o) {
+  const key = `${merchant.id}:${o.advOrderNo}`;
+  const hit = detailCache.get(key);
+  if (hit && Date.now() - hit.at < 15 * 60000) return hit.info;
+  let info = { realName: null, pay: null };
+  try {
+    let d;
+    if (merchant.platform === 'bingx') {
+      d = await require('./bingxOrders').getDetail(merchant, o.advOrderNo, true);
+    } else {
+      const { mexcGet } = require('./mexcApi');
+      const r = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo: o.advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
+      d = r?.data || null;
+    }
+    if (d) {
+      const p = d.confirmPaymentInfo || (Array.isArray(d.paymentInfo) ? d.paymentInfo[0] : null);
+      info = {
+        realName: d.userInfo?.realName || null,
+        pay: p ? { bank: bankName(p.payMethod, p.bankName), account: p.account || '', payee: p.payee || '' } : null,
+      };
+    }
+  } catch { /* fall back to list fields */ }
+  detailCache.set(key, { at: Date.now(), info });
+  for (const [k, v] of detailCache) if (Date.now() - v.at > 30 * 60000) detailCache.delete(k);
+  return info;
+}
+
+/** Build title/body/HTML for an event. `o` is a house-shaped list row. */
+function compose(ev, info = {}) {
   const { type, merchant, o } = ev;
-  const plat = (merchant.platform || 'mexc').toUpperCase();
-  const who = o.userInfo?.realName || o.userInfo?.nickName || '—';
-  const money = `${fmtIdr(o.amount)} ${o.fiatUnit || ''} · ${parseFloat(o.tradableQuantity || 0).toFixed(2)} USDT`;
+  const plat = (merchant.platform || 'mexc') === 'bingx' ? 'BingX' : 'MEXC';
+  const name = info.realName || null;
+  const nick = o.userInfo?.nickName || '';
   const side = o.side === 'BUY' ? 'BELI' : 'JUAL';
+  const fiat = fmtFiat(o.amount, o.fiatUnit);
+  const usdt = fmtUsdt(o.tradableQuantity);
   const heads = {
-    newOrder:  ['🆕 Order baru', `${side} · ${money}`],
-    paid:      ['💸 Buyer sudah bayar — siap release', money],
-    message:   ['💬 Pesan chat masuk', `${o.unreadCount || 1} pesan belum dibaca`],
-    cancelled: ['❌ Order dibatalkan', money],
-    appeal:    ['⚠️ Banding / status tak dikenal', `${money}${o._bingx?.orderStatus !== undefined ? ` · status BingX ${o._bingx.orderStatus}` : ''}`],
-    done:      ['✅ Order selesai', money],
+    newOrder:  ['🆕', 'Order baru'],
+    paid:      ['💸', 'Buyer sudah bayar — siap release'],
+    message:   ['💬', `Pesan chat masuk (${o.unreadCount || 1} belum dibaca)`],
+    cancelled: ['❌', 'Order dibatalkan'],
+    appeal:    ['⚠️', o._bingx?.orderStatus !== undefined && o.state === 10 ? `Status BingX tak dikenal (${o._bingx.orderStatus})` : 'Banding'],
+    done:      ['✅', 'Order selesai'],
   };
-  const [title, line] = heads[type] || [type, ''];
-  const url = ev.url || '/queue';
+  const [icon, head] = heads[type] || ['🔔', type];
+  const pay = info.pay;
+  const bankLine = pay ? `${pay.bank || '—'}${pay.account ? ` · ${pay.account}` : ''}${pay.payee ? ` · a/n ${pay.payee}` : ''}` : null;
+  const no = String(o.advOrderNo);
+
+  const tgLines = [
+    `${icon} <b>${esc(head)}</b>`,
+    `<i>${esc(merchant.name)} · ${plat}</i>`,
+    '',
+    `👤 <b>${esc(name || nick || '—')}</b>${name && nick ? `\n     ${esc(nick)}` : ''}`,
+    `🔁 <b>${side}</b> ${esc(usdt)}`,
+    `💰 <b>${esc(fiat)}</b>`,
+  ];
+  if (pay) tgLines.push(`🏦 ${esc(pay.bank || '—')}${pay.account ? ` · <code>${esc(pay.account)}</code>` : ''}${pay.payee ? `\n     a/n ${esc(pay.payee)}` : ''}`);
+  tgLines.push(`🧾 <code>${esc(no)}</code>`);
+
+  const pushBody = [
+    `${name || nick || '—'}`,
+    `${side} ${usdt} · ${fiat}`,
+    bankLine,
+  ].filter(Boolean).join('\n');
+
   return {
-    title: `${title} · ${merchant.name}`,
-    body: `${who}\n${line}`,
-    tag: `${merchant.id}:${o.advOrderNo}:${type}`,
-    url,
-    telegram: `<b>${esc(title)}</b> · ${esc(merchant.name)} <i>(${plat})</i>\n${esc(who)}\n${esc(line)}\n#${esc(String(o.advOrderNo).slice(-8))}`,
+    title: `${icon} ${head} · ${merchant.name}`,
+    body: pushBody,
+    tag: `${merchant.id}:${no}:${type}`,
+    url: ev.url || '/queue',
+    telegram: tgLines.join('\n'),
   };
 }
 
 async function dispatch(ev) {
   const settings = getSettings();
   if (settings.events[ev.type] === false) return { skipped: 'event off' };
-  const msg = compose(ev);
+  const info = ev.merchant?.id && ev.merchant.id !== 'test' ? await enrich(ev.merchant, ev.o) : {};
+  const msg = compose(ev, info);
   const [push, tg] = await Promise.all([
     pushAll({ title: msg.title, body: msg.body, tag: msg.tag, url: msg.url, type: ev.type }),
     settings.telegram.enabled ? telegramSend(msg.telegram) : Promise.resolve({ ok: null }),
@@ -197,9 +257,9 @@ async function dispatch(ev) {
 }
 
 async function testAll() {
-  const fake = { type: 'newOrder', merchant: { id: 'test', name: 'Tes', platform: 'mexc' }, o: { advOrderNo: '000000TEST', side: 'SELL', amount: '1500000', fiatUnit: 'IDR', tradableQuantity: '92.5', userInfo: { nickName: 'tes@notifikasi' } } };
+  const fake = { type: 'paid', merchant: { id: 'test', name: 'Contoh Merchant', platform: 'mexc' }, o: { advOrderNo: '20260922000000TEST', side: 'SELL', amount: '1500000', fiatUnit: 'IDR', tradableQuantity: '92.5', userInfo: { nickName: 'bu***i@gmail.com' } } };
   const settings = getSettings();
-  const msg = compose(fake);
+  const msg = compose(fake, { realName: 'BUDI SANTOSO', pay: { bank: 'BCA', account: '1234567890', payee: 'SANDCHIK' } });
   const push = await pushAll({ title: '🔔 Tes notifikasi · SandChik P2P', body: 'Kalau ini muncul, Web Push jalan di perangkat ini.', tag: 'test', url: '/queue', type: 'test' });
   const tg = settings.telegram.enabled ? await telegramSend('🔔 <b>Tes notifikasi</b> — Telegram terhubung ke SandChik P2P.\n\nContoh format:\n' + msg.telegram) : { ok: null };
   remember({ type: 'test', merchant: '—', order: '—', push, telegram: tg });

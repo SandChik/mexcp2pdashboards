@@ -179,6 +179,13 @@ tempat ia mendaftar (mis. `https://vm-0-9-ubuntu.tail32cc17.ts.net`).
 Perangkat yang mendaftar sebelum v72: Matikan lalu Aktifkan lagi sekali.
 Env `NOTIFY_VAPID_SUBJECT` untuk memaksa nilai lain.
 
+v73: pemantau notifikasi sempat buta terhadap MEXC — MEXC mengirim status
+sebagai teks (`PAID`), BingX sebagai angka; `Number("PAID")` = NaN, jadi tidak
+ada peristiwa MEXC yang terdeteksi. Diperbaiki dengan normalisasi yang sama
+seperti worker lain. Isi notif diperkaya dari detail order (satu panggilan per
+order, cache 15 menit): nama KYC, JUAL/BELI, nominal Rp + USDT, bank & nomor
+rekening penerima (tap-to-copy di Telegram), nomor order.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 
