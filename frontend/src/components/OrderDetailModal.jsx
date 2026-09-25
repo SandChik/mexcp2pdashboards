@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { copyToClipboard } from '../clipboard';
 import { X, Send, CheckCircle, Coins, RefreshCw, Wifi, WifiOff, AlertCircle, Copy, Image, Paperclip } from 'lucide-react';
 import { ordersApi, chatApi, merchantApi } from '../api';
-import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, KYC_LABELS, getBankName, PlatformBadge } from './helpers';
+import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, KYC_LABELS, getBankName, PlatformBadge, AppealBadge, isAppeal } from './helpers';
 import toast from 'react-hot-toast';
 import { askConfirm } from './confirm';
 
@@ -272,6 +272,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
             </button>
             {isBingx && <PlatformBadge platform="bingx" />}
             {order && <OrderStateBadge state={stateNum} />}
+            {order && isAppeal(order) && <AppealBadge />}
             {order && <SideBadge side={displaySide} />}
           </div>
           <button onClick={onClose} className="text-surface-200/40 hover:text-white transition-colors ml-3"><X size={18} /></button>

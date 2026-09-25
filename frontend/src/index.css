@@ -100,3 +100,15 @@
   }
   .animate-pulse-glow { animation: pulse-glow 2.4s ease-in-out infinite; }
 }
+
+/* iOS "Add to Home Screen" (standalone): with black-translucent status bar and
+   viewport-fit=cover the web view starts UNDER the status bar / Dynamic Island,
+   so page headers were hidden behind the clock. Push the whole document down
+   by the inset and shrink the full-height pages by the same amount. The inset
+   is 0 in a normal browser tab and on Android, so nothing changes there. */
+@media (display-mode: standalone) {
+  body { padding-top: env(safe-area-inset-top, 0px); background: #000; }
+  .h-\[100dvh\] { height: calc(100dvh - env(safe-area-inset-top, 0px)) !important; }
+  .min-h-\[100dvh\] { min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important; }
+  .min-h-screen { min-height: calc(100vh - env(safe-area-inset-top, 0px)) !important; }
+}

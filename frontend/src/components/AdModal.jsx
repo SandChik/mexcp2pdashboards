@@ -37,6 +37,15 @@ export default function AdModal({ merchantId, existingAd, onClose, onSaved }) {
     autoReplyMsg: existingAd.autoReplyMsg || '',
     tradeTerms: existingAd.tradeTerms || '',
   });
+  // Extra buyer verification (MEXC `overVerify`, SELL ads only). MEXC never
+  // returns the current value, so the backend remembers what was chosen here
+  // per ad (`_overVerify`) and re-sends it on every save.
+  const parsedOV = (() => { try { return existingAd._overVerify ? JSON.parse(existingAd._overVerify) : null; } catch { return null; } })();
+  const [verifyOn, setVerifyOn] = useState(!!(parsedOV && Array.isArray(parsedOV.types) && parsedOV.types.length));
+  const [verifyTypes, setVerifyTypes] = useState(parsedOV?.types || []);
+  const [verifyOther, setVerifyOther] = useState(parsedOV?.otherText || '');
+  const VERIFY_TYPES = [[1, 'KTP / ID card'], [2, 'Paspor'], [3, 'Selfie'], [4, 'Bukti alamat'], [5, 'Tagihan (billing)'], [6, 'Lainnya (teks)']];
+  const toggleVerifyType = (t) => setVerifyTypes(v => v.includes(t) ? v.filter(x => x !== t) : (v.length >= 3 ? (toast.error('Maksimal 3 jenis'), v) : [...v, t]));
   const [showRaw, setShowRaw] = useState(false);
   const [loading, setLoading] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -102,6 +111,14 @@ export default function AdModal({ merchantId, existingAd, onClose, onSaved }) {
       // raw string and sends URL-encoded, so these go through unchanged.
       if (form.autoReplyMsg) payload.autoReplyMsg = form.autoReplyMsg;
       if (form.tradeTerms) payload.tradeTerms = form.tradeTerms;
+      if (existingAd.side === 'SELL') {
+        if (verifyOn && verifyTypes.length) {
+          if (verifyTypes.includes(6) && !verifyOther.trim()) { toast.error('Isi teks untuk jenis "Lainnya"'); setLoading(false); return; }
+          payload.overVerify = { types: verifyTypes, ...(verifyTypes.includes(6) ? { otherText: verifyOther.trim() } : {}) };
+        } else {
+          payload.overVerify = ''; // explicit "none" → backend forgets the remembered value
+        }
+      }
 
       const r = await adsApi.saveOrUpdate(merchantId, payload);
       if (r.data?.code === 0) { toast.success('Ad updated'); onSaved?.(); onClose(); }
@@ -213,6 +230,37 @@ export default function AdModal({ merchantId, existingAd, onClose, onSaved }) {
             <textarea value={form.tradeTerms} onChange={e => set('tradeTerms', e.target.value)}
               rows={3} className={`${INP} resize-none`} placeholder="Shown to the buyer before they order" />
           </div>
+
+          {existingAd.side === 'SELL' && (
+            <div className="border border-warning/30 bg-warning/5 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm text-surface-50 font-medium">Verifikasi tambahan buyer</p>
+                  <p className="text-[11px] text-surface-300">Buyer harus mengunggah dokumen; lo menyetujui/menolak di app MEXC (API belum punya aksinya).</p>
+                </div>
+                <button type="button" onClick={() => setVerifyOn(v => !v)}
+                  className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${verifyOn ? 'bg-warning' : 'bg-surface-700'}`}>
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${verifyOn ? 'left-[22px]' : 'left-0.5'}`} />
+                </button>
+              </div>
+              {verifyOn && (
+                <>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {VERIFY_TYPES.map(([t, label]) => (
+                      <button key={t} type="button" onClick={() => toggleVerifyType(t)}
+                        className={`text-xs rounded-lg px-2.5 py-2 border text-left transition-colors ${verifyTypes.includes(t) ? 'bg-warning/15 border-warning/50 text-warning' : 'bg-surface-900 border-surface-700 text-surface-300 hover:text-surface-100'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {verifyTypes.includes(6) && (
+                    <input value={verifyOther} onChange={e => setVerifyOther(e.target.value)} className={INP} placeholder="Teks permintaan, mis. 'Kirim bukti mutasi 3 bulan terakhir'" />
+                  )}
+                  <p className="text-[11px] text-surface-300">Maksimal 3 jenis. MEXC tidak mengembalikan setelan ini lewat API — dashboard mengingat pilihan lo per iklan. Kalau iklan ini sudah punya verifikasi yang diatur di app, centang jenis yang sama di sini sekali supaya tidak hilang saat disimpan.</p>
+                </>
+              )}
+            </div>
+          )}
         </form>
 
         <div className="px-5 py-4 border-t border-surface-700 flex gap-3">

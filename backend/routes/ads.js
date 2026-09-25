@@ -7,6 +7,14 @@ const { mexcGet, mexcPost } = require('../utils/mexcApi');
 const { getMerchant } = require('../utils/store');
 const { audit } = require('../utils/audit');
 const bx = require('../utils/bingxOrders');
+
+// MEXC never returns an ad's `overVerify` (extra buyer verification) in the
+// ads list, so an edit that carries the ad through would silently drop it.
+// The dashboard remembers the operator's choice per ad here and re-sends it
+// on every save. Set in-app but not here? Tick it in the edit form once.
+const VERIFY_PATH = path.join(__dirname, '../data/ad-verify.json');
+function readVerify() { try { return JSON.parse(fs.readFileSync(VERIFY_PATH, 'utf8')); } catch { return {}; } }
+function writeVerify(v) { try { fs.writeFileSync(VERIFY_PATH, JSON.stringify(v, null, 2)); } catch { /* ignore */ } }
 const bxAds = require('../utils/bingxAds');
 const router = express.Router();
 
@@ -69,6 +77,8 @@ router.get('/:merchantId', authMiddleware, async (req, res) => {
   }
   try {
     const all = await fetchAllAds({}, merchant.apiKey, merchant.apiSecret);
+    const mem = readVerify();
+    all.forEach(a => { if (a && a.advNo && mem[a.advNo]) a._overVerify = mem[a.advNo]; });
     res.json({ code: 0, msg: 'success', data: all });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -101,8 +111,19 @@ router.post('/:merchantId', authMiddleware, async (req, res) => {
     } catch (err) { return bingxFail(res, err); }
   }
   try {
+    const body = { ...req.body };
+    const mem = readVerify();
+    if (body.overVerify !== undefined) {
+      // Explicit choice from the form: object → JSON string; empty → forget.
+      const ov = typeof body.overVerify === 'string' ? body.overVerify : JSON.stringify(body.overVerify);
+      if (ov && ov !== '{}' && ov !== 'null') { body.overVerify = ov; if (body.advNo) mem[body.advNo] = ov; }
+      else { delete body.overVerify; if (body.advNo) delete mem[body.advNo]; }
+      writeVerify(mem);
+    } else if (body.advNo && mem[body.advNo]) {
+      body.overVerify = mem[body.advNo]; // carry the remembered setting so an edit never wipes it
+    }
     const result = await mexcPost('/api/v3/fiat/merchant/ads/save_or_update',
-      req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
+      body, merchant.apiKey, merchant.apiSecret, { priority: true });
     audit({ action: 'ad_save', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, side: req.body.side, price: req.body.price, code: result?.code, msg: result?.msg });
     res.json(result);
   } catch (err) {

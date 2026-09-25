@@ -78,7 +78,10 @@ export async function releaseOrder(merchantId, order, { skipConfirm = false } = 
   const pay = v.detail?.confirmPaymentInfo || v.detail?.paymentInfo?.[0] || null;
 
   if (!skipConfirm) {
+    const appeal = v.detail?.complained === true || v.detail?.complaining === true || order.complaining === true;
     const lines = [
+      appeal ? '⚠️ ORDER INI SEDANG BANDING (dispute). Cek dulu di app sebelum release.' : null,
+      appeal ? '' : null,
       realName ? `Nama KYC : ${realName}` : null,
       `Nickname : ${nick}`,
       `Dia bayar: ${amt}`,

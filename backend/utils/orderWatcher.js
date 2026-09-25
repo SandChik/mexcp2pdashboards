@@ -28,6 +28,10 @@ function normState(s) {
  *   appeal    — → 9 (BingX appeal) or 10 (status the adapter doesn't know)
  *   done      — running → 4 (off by default)
  *   message   — unreadCount grew; at most one per order per 90s
+ *   verify    — → 2 (WAIT_PROCESS): buyer on an extra-verification ad is
+ *               waiting for the merchant to approve/reject — in the MEXC app,
+ *               the API has no endpoint for it
+ *   appeal    — also when MEXC's `complaining` flag flips to true (state stays PAID)
  */
 const INTERVAL_MS = Math.max(5000, parseInt(process.env.NOTIFY_INTERVAL_MS || '10000', 10));
 const RUNNING = new Set([0, 1, 2, 3, 9, 10]);
@@ -54,7 +58,7 @@ async function cycle() {
       const orders = (Array.isArray(list) ? list : []).map(o => ({ ...o, _state: normState(o.state) }));
       const before = prev[m.id] || {};
       const after = {};
-      orders.forEach(o => { after[o.advOrderNo] = { state: o._state, unread: Number(o.unreadCount) || 0 }; });
+      orders.forEach(o => { after[o.advOrderNo] = { state: o._state, unread: Number(o.unreadCount) || 0, appeal: o.complaining === true }; });
 
       if (!primed.has(m.id)) { primed.add(m.id); prev[m.id] = after; continue; }
 
@@ -63,15 +67,17 @@ async function cycle() {
         const b = before[o.advOrderNo];
         const s = o._state;
         if (!b) {
-          if (RUNNING.has(s)) events.push({ type: 'newOrder', o });
+          if (RUNNING.has(s)) events.push({ type: s === 2 ? 'verify' : 'newOrder', o });
           continue;
         }
         if (b.state !== s) {
-          if (s === 1 && b.state === 0 && o.side === 'SELL') events.push({ type: 'paid', o });
+          if (s === 1 && (b.state === 0 || b.state === 2) && o.side === 'SELL') events.push({ type: 'paid', o });
           else if (CANCELLED.has(s) && RUNNING.has(b.state)) events.push({ type: 'cancelled', o });
           else if ((s === 9 || s === 10) && b.state !== 9 && b.state !== 10) events.push({ type: 'appeal', o });
+          else if (s === 2 && b.state !== 2) events.push({ type: 'verify', o });
           else if (s === 4 && RUNNING.has(b.state)) events.push({ type: 'done', o });
         }
+        if (o.complaining === true && !b.appeal) events.push({ type: 'appeal', o }); // MEXC: flag, not a state
         const unread = Number(o.unreadCount) || 0;
         if (unread > (b.unread || 0) && RUNNING.has(s)) {
           const key = `${m.id}:${o.advOrderNo}`;

@@ -7,6 +7,7 @@ import {
 import { playSound } from '../sounds';
 import { announceOrderChanges } from '../orderEvents';
 import { ingestOrders } from '../actionQueue';
+import { AppealBadge } from './helpers';
 import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
 import OrderDetailModal from './OrderDetailModal';
@@ -573,6 +574,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <SideBadge side={order.side} />
                         <OrderStateBadge state={order._state} />
+                        {order.complaining === true && <AppealBadge />}
                       {order.unreadCount > 0 && (
                         <button onClick={e => { e.stopPropagation(); setOpenChatOrder(order.advOrderNo); }}
                           title={`${order.unreadCount} pesan belum dibaca — buka chat`}

@@ -186,6 +186,25 @@ seperti worker lain. Isi notif diperkaya dari detail order (satu panggilan per
 order, cache 15 menit): nama KYC, JUAL/BELI, nominal Rp + USDT, bank & nomor
 rekening penerima (tap-to-copy di Telegram), nomor order.
 
+## v74 — dari dokumentasi resmi MEXC (api-docs/p2p)
+
+- **Banding MEXC** bukan status, tapi bendera: `complaining` (daftar) /
+  `complained` (detail). Sekarang tampil sebagai lencana "⚠ Banding" di
+  Antrian, panel, modal; bunyi + toast saat pertama terlihat; dialog Release
+  memberi peringatan; notifikasi jenis "banding" ikut terpicu.
+- Daftar cepat MEXC memakai endpoint **V2** (`…/order/paginationV2`, scroll
+  pagination, membawa `complaining`); V1 hanya cadangan 10 menit bila V2 gagal.
+- **Verifikasi tambahan** (`overVerify`): order yang menunggu persetujuan lo
+  (`WAIT_PROCESS`) kini berlabel "Verifikasi" dengan teks "setujui/tolak di app
+  MEXC", plus notifikasi jenis "verify". API MEXC belum punya aksi
+  setuju/tolak — permintaan sudah dikirim ke MEXC.
+- Form edit iklan MEXC punya bagian "Verifikasi tambahan buyer" (jenis dokumen,
+  maks 3). MEXC tidak mengembalikan setelan ini lewat API, jadi dashboard
+  mengingatnya per iklan (`backend/data/ad-verify.json`) dan mengirimnya ulang
+  di setiap simpan — edit harga tidak lagi berisiko mematikan verifikasi.
+- iPhone "Add to Home Screen": judul halaman tidak lagi tertutup status bar /
+  Dynamic Island (safe-area di mode standalone).
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

@@ -31,6 +31,28 @@ const TERMINAL = new Set([4, 5, 6, 7, 8]); // done/cancel/invalid/refuse/timeout
 const TERMINAL_BINGX = new Set([4, 5, 6, 7, 8, 9]); // + 9 = appeal: never release while a dispute is open
 
 // Single window fetch — MEXC max 20 pages × 10 = 200 per window
+// ── V2 order list (MEXC docs, June 2026): scroll pagination via
+//    lastCreateTime + lastId, and it carries `complaining` (appeal flag) which
+//    the V1 page-based endpoint may not. Used for the quick window; if MEXC
+//    answers with an error the caller falls back to V1 for ten minutes.
+const V2_PATH = '/api/v3/fiat/market/order/paginationV2';
+let v2DownUntil = 0;
+async function fetchWindowV2(params, apiKey, apiSecret, maxPages = 4) {
+  let all = [];
+  let cursor = {};
+  for (let page = 0; page < maxPages; page++) {
+    const res = await mexcGet(V2_PATH, { ...params, ...cursor, limit: 50 }, apiKey, apiSecret);
+    if (res.code !== 0) { const e = new Error(`MEXC V2 ${res.code}: ${res.msg}`); e.mexc = res; throw e; }
+    const items = Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.data) ? res.data.data : []);
+    if (items.length === 0) break;
+    all = all.concat(items);
+    if (items.length < 50) break;
+    const last = items[items.length - 1];
+    cursor = { lastCreateTime: last.createTime, lastId: last.advOrderNo };
+  }
+  return all;
+}
+
 async function fetchWindow(endpoint, params, apiKey, apiSecret, maxPages = 20) {
   let all = [];
   for (let page = 1; page <= maxPages; page++) {
@@ -114,6 +136,15 @@ async function getOrders(endpoint, params, apiKey, apiSecret, isQuick) {
     // 5s across 3 merchants — more than the global rate gate can serve, so
     // the queue backs up and EVERYTHING gets slow. Older rows are carried
     // over by the client-side merge; active orders are always the newest.
+    // v74: the documented V2 endpoint first (it carries `complaining`, the
+    // appeal flag); V1 only when V2 errors, for ten minutes at a time.
+    if (Date.now() > v2DownUntil) {
+      try { return await fetchWindowV2({ ...params, startTime: now - DAY, endTime: now }, apiKey, apiSecret, 4); }
+      catch (e) {
+        v2DownUntil = Date.now() + 10 * 60000;
+        console.error('[orders] V2 list failed, V1 for 10 min —', e.mexc?.msg || e.response?.data?.msg || e.message);
+      }
+    }
     return fetchWindow(endpoint,
       { ...params, startTime: now - DAY, endTime: now },
       apiKey, apiSecret, 8);
