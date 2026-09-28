@@ -205,6 +205,18 @@ rekening penerima (tap-to-copy di Telegram), nomor order.
 - iPhone "Add to Home Screen": judul halaman tidak lagi tertutup status bar /
   Dynamic Island (safe-area di mode standalone).
 
+v75 — riwayat BingX seminggu lalu tidak muncul. Dua sebab, dua perbaikan:
+- Penelusuran halaman berhenti begitu satu halaman berisi kurang dari 100
+  baris. Dokumen bilang pageSize maks 100, tapi kalau BingX diam-diam
+  membatasi (mis. 20), penelusuran berhenti di halaman pertama dan riwayat
+  lama tidak pernah terbaca. Sekarang dipandu `total` dari BingX, ukuran
+  halaman menyesuaikan yang benar-benar dikembalikan, dedupe, batas 50 halaman.
+- Panel bisa membuang permintaan "muat rentang" bila polling 5 detik sedang
+  berjalan (`busyRef`), sehingga ganti tanggal kadang tidak memuat apa pun.
+  Sekarang diantrekan, bukan dibuang (BingX dan MEXC).
+Panel BingX menampilkan baris diagnostik: berapa order dibaca dari total,
+order tertua yang dicapai, dan apakah batas halaman tercapai.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

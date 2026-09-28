@@ -135,8 +135,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   // 1s tick driving the countdown badges
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
+  const pendingFullRef = useRef(false);
   const doFetch = useCallback(async (quiet = false, quick = false) => {
-    if (busyRef.current) return;
+    if (busyRef.current) { if (!quick) pendingFullRef.current = true; return; } // queue a full fetch instead of dropping it (v75)
     busyRef.current = true;
     if (!quiet) setRefreshing(true);
     try {
@@ -185,6 +186,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       if (!quiet) toast.error(`Gagal memuat order — ${merchant.name}. Cek koneksi atau API key.`);
     } finally {
       setLoading(false); setRefreshing(false); busyRef.current = false;
+      if (pendingFullRef.current) { pendingFullRef.current = false; doFetch(false, false); }
     }
   }, [merchant.id, merchant.name]);
 

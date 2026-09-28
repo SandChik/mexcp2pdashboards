@@ -171,7 +171,7 @@ router.get('/:merchantId/market', authMiddleware, async (req, res) => {
     const params = { ...baseParams, startTime, endTime };
     const data = await getOrdersCached('/api/v3/fiat/market/order/pagination',
       params, merchant, quick === 'true');
-    res.json({ code: 0, data, total: data.length });
+    res.json({ code: 0, data, total: data.length, ...(data.meta ? { meta: data.meta } : {}) });
   } catch (err) {
     console.error('[orders/market]', err.message);
     res.status(500).json({ code: -1, error: err.message });
