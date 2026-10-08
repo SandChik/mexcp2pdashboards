@@ -259,6 +259,35 @@ order tertua yang dicapai, dan apakah batas halaman tercapai.
 - Form login/Settings: 401 dari form (password salah) tidak lagi memuat ulang
   halaman — pesannya tampil.
 
+## v77 — verifikasi tambahan MEXC ternyata hidup di chat, bukan di status
+
+Diamati langsung (8 Okt 2026): order dengan verifikasi tambahan **tetap
+NOT_PAID** sepanjang proses. MEXC menandai tahapannya lewat pesan sistem di
+chat (`{"ext":{"operatorMsgKey":…}}`): `OVER_VERIFY_SEND_FILE_TIP` (buyer
+mengunggah dokumen), `OVER_VERIFY_PASS_TIP` (disetujui), `OVER_VERIFY_FAIL_TIP`
+(ditolak — order lalu menjadi CANCEL, bukan REFUSE). Pilihan "Verifikasi
+diterima (keluar dari WAIT_PROCESS)" dari v76 karena itu tidak pernah kena.
+
+- Worker auto-reply membaca riwayat chat order SELL yang masih berjalan
+  (maks 10 per merchant per siklus, `conversationId` di-cache) dan mengenali
+  pesan sistem itu (`utils/verifyChat.js`). Tiga pemicu di dropdown aturan:
+  **"Verifikasi: buyer mengirim dokumen"**, **"Verifikasi diterima"**,
+  **"Verifikasi ditolak"**. Dipicu oleh pesan chat, jadi jalan juga untuk order
+  yang sudah ada saat server restart. Event yang sudah dipakai disimpan di
+  `backend/data/verify-seen.json` (dipangkas 3 hari) supaya restart tidak
+  mengulang.
+- Notifikasi: "Buyer mengirim dokumen verifikasi" (`verify`, dulu menunggu
+  status 2 yang tidak pernah datang), "Verifikasi diterima" (`verified`), dan
+  baru **"Verifikasi ditolak"** (`verifyFailed`, default OFF) — dikirim dari
+  worker begitu pesan sistemnya terlihat.
+- Chat di dashboard: pesan sistem JSON itu kini tampil sebagai baris sistem
+  yang terbaca ("📎 Buyer mengirim dokumen verifikasi", "✅ Verifikasi
+  diterima", "⛔ Verifikasi ditolak"); kunci `OVER_VERIFY_*` lain tampil apa
+  adanya agar varian baru langsung kelihatan.
+- Panel status worker menampilkan "verifikasi terakhir: …" (order + jenis/kunci).
+- Versi tampilan (`frontend/src/version.js`) ikut dinaikkan — v76 pertama
+  lupa, sehingga panel Versi menampilkan v75/v76.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

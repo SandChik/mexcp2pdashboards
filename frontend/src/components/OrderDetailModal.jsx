@@ -6,6 +6,24 @@ import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, K
 import toast from 'react-hot-toast';
 import { askConfirm } from './confirm';
 
+
+// MEXC chat system messages: {"ext":{"operatorMsgKey":"OVER_VERIFY_PASS_TIP",…},"exchange":false}
+const SYSTEM_NOTICES = {
+  OVER_VERIFY_SEND_FILE_TIP: { text: '📎 Buyer mengirim dokumen verifikasi — setujui/tolak di app MEXC', tone: 'bg-warning/10 text-warning ring-warning/30' },
+  OVER_VERIFY_PASS_TIP:      { text: '✅ Verifikasi diterima — buyer boleh bayar', tone: 'bg-buy/10 text-buy ring-buy/30' },
+  OVER_VERIFY_FAIL_TIP:      { text: '⛔ Verifikasi ditolak', tone: 'bg-sell/10 text-sell ring-sell/30' },
+};
+function systemNotice(m) {
+  const c = m?.content;
+  if (typeof c !== 'string' || c[0] !== '{' || !c.includes('operatorMsgKey')) return null;
+  try {
+    const key = JSON.parse(c)?.ext?.operatorMsgKey;
+    if (!key) return null;
+    const known = SYSTEM_NOTICES[key];
+    return { key, text: known ? known.text : `ℹ️ Pesan sistem MEXC: ${key}`, tone: known ? known.tone : 'bg-surface-800 text-surface-200 ring-surface-600' };
+  } catch { return null; }
+}
+
 export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 'detail', onClose, onActionDone }) {
   // Escape always exits the modal (heuristic #3: user control & freedom)
   useEffect(() => {
@@ -459,7 +477,18 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
               {messages.length === 0 && wsStatus === 'connected' && (
                 <p className="text-center text-surface-200/20 text-xs py-8 font-mono">Belum ada pesan</p>
               )}
-              {messages.map((m, i) => (
+              {messages.map((m, i) => {
+                // MEXC system notices arrive as JSON text — show them as a
+                // centered system line instead of a green JSON bubble (v77).
+                const sys = systemNotice(m);
+                if (sys) return (
+                  <div key={m.id || i} className="flex justify-center">
+                    <div className={`max-w-[90%] text-center text-[11px] rounded-full px-3 py-1 ring-1 ${sys.tone}`} title={sys.key}>
+                      {sys.text} <span className="opacity-50 font-mono">{formatTime(m.createTime)}</span>
+                    </div>
+                  </div>
+                );
+                return (
                 <div key={m.id || i} className={`flex ${m.self ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[78%] rounded-xl px-3 py-2 text-sm ${m.self ? 'bg-green-500/20 text-green-300' : 'bg-surface-800 text-white'}`}>
                     {!m.self && <p className="text-xs text-surface-200/40 mb-1 font-mono">{m.fromNickName || 'Buyer'}</p>}
@@ -472,7 +501,8 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                     <p className="text-xs opacity-30 mt-1 text-right font-mono">{formatTime(m.createTime)}</p>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               <div ref={msgEndRef} />
             </div>
           )}

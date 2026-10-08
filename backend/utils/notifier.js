@@ -33,8 +33,9 @@ const EVENT_DEFS = {
   message:   { label: 'Pesan chat masuk',           default: true },
   cancelled: { label: 'Order dibatalkan / timeout', default: true },
   appeal:    { label: 'Banding / status tak dikenal', default: true },
-  verify:    { label: 'Buyer menunggu verifikasi (setujui di app MEXC)', default: true },
+  verify:    { label: 'Buyer mengirim dokumen verifikasi (setujui/tolak di app MEXC)', default: true },
   verified:  { label: 'Verifikasi diterima (buyer boleh bayar)', default: true },
+  verifyFailed: { label: 'Verifikasi ditolak', default: false },
   done:      { label: 'Order selesai',              default: false },
 };
 const DEFAULT_SETTINGS = {
@@ -212,8 +213,9 @@ function compose(ev, info = {}) {
     message:   ['💬', `Pesan chat masuk (${o.unreadCount || 1} belum dibaca)`],
     cancelled: ['❌', 'Order dibatalkan'],
     appeal:    ['⚠️', o._bingx?.orderStatus !== undefined && o.state === 10 ? `Status BingX tak dikenal (${o._bingx.orderStatus})` : 'Banding'],
-    verify:    ['🪪', 'Buyer menunggu verifikasi — setujui/tolak di app MEXC'],
+    verify:    ['🪪', 'Buyer mengirim dokumen verifikasi — setujui/tolak di app MEXC'],
     verified:  ['🟢', 'Verifikasi diterima — buyer sekarang boleh bayar'],
+    verifyFailed: ['⛔', 'Verifikasi ditolak — order akan dibatalkan'],
     done:      ['✅', 'Order selesai'],
   };
   const [icon, head] = heads[type] || ['🔔', type];
