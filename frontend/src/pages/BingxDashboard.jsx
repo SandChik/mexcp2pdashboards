@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { merchantApi } from '../api';
-import BingxPanel from '../components/BingxPanel';
+import MerchantPanel from '../components/MerchantPanel';
 import Layout from '../components/Layout';
 import { PlatformBadge } from '../components/helpers';
 import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X } from 'lucide-react';
@@ -252,14 +252,14 @@ export default function BingxDashboard() {
           <div className="grid flex-1 gap-3 p-3 overflow-hidden min-h-0"
             style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
             {shown.map(m => (
-              <BingxPanel key={m.id} merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
+              <MerchantPanel key={m.id} merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
             ))}
           </div>
         ) : (
           <div className="flex-1 min-h-0 p-2.5">
             {shown.map((m, i) => (
               <div key={m.id} className={i === activeMerchant ? 'h-full' : 'hidden'}>
-                <BingxPanel merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
+                <MerchantPanel merchant={m} dateRange={dateRange} refreshKey={refreshKey} autoRefresh={autoRefresh} />
               </div>
             ))}
           </div>

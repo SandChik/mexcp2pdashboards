@@ -43,7 +43,13 @@ const primed = new Set();   // merchantIds whose baseline states are recorded
 const startedAt = Date.now();
 // Per-merchant diagnostics for Settings → Pesan ("why didn't it send?").
 const diag = {};            // merchantId -> { ... }
-function d(mid) { return diag[mid] || (diag[mid] = { cycles: 0, sent: 0, lastCycleAt: null, ordersSeen: 0, running: 0, rulesActive: 0, primedAt: null, lastMatch: null, lastSentAt: null, lastError: null, skipped: null }); }
+function d(mid) { return diag[mid] || (diag[mid] = { cycles: 0, sent: 0, lastCycleAt: null, ordersSeen: 0, running: 0, rulesActive: 0, primedAt: null, lastMatch: null, lastSentAt: null, lastError: null, skipped: null, transitions: [] }); }
+// v76: remember the last state hops per merchant (newest first) so the Settings
+// screen can show what a verification order ACTUALLY did (2 → 0? 2 → 3?).
+function noteTransition(dg, o, from, to) {
+  dg.transitions.unshift({ at: Date.now(), advOrderNo: o.advOrderNo, side: o.side, from, to });
+  if (dg.transitions.length > 20) dg.transitions.length = 20;
+}
 function status(mid) {
   const x = d(mid);
   return { ...x, workerOn: process.env.AUTO_REPLY_WORKER !== '0', intervalMs: INTERVAL_MS, uptimeMs: Date.now() - startedAt, primed: primed.has(mid) };
@@ -86,15 +92,32 @@ async function alreadySaid(merchant, cid, text) {
   }
 }
 
+// States that mean "this order did not go through": a WAIT_PROCESS order that
+// lands here was REFUSED/cancelled, not verified.
+const FAILED = new Set([5, 6, 7, 8]);
+const VERIFY_PENDING = 2; // WAIT_PROCESS
+
 /** Which rules fire for this order's transition. */
 function matchRules(rules, order, prevState, isNew) {
-  return (rules || []).filter(rule => {
+  const hits = (rules || []).filter(rule => {
     if (!rule.message || !rule.message.trim()) return false;
     if (rule.side !== 'ANY' && rule.side !== order.side) return false;
     if (rule.state === -1) return isNew;                    // "order baru masuk"
+    if (rule.state === -2) {
+      // "Verifikasi diterima" (v76): a TRANSITION, not a state — MEXC has no
+      // "verified" value in OrderDealState. The order LEAVES WAIT_PROCESS for
+      // anything that isn't a failure (normally NOT_PAID, so the buyer can pay).
+      // Deliberately not pinned to NOT_PAID: if MEXC routes through PROCESSING
+      // first, this still fires exactly once, on the first hop out.
+      return !isNew && prevState === VERIFY_PENDING && order._state !== VERIFY_PENDING && !FAILED.has(order._state) && order._state !== 9 && order._state !== 10;
+    }
     if (rule.state !== order._state) return false;
     return isNew || prevState !== order._state;             // only on ENTERING the state
   });
+  // When "Verifikasi diterima" fires, it IS the greeting for this hop — a plain
+  // "Belum bayar" rule entering NOT_PAID at the same moment would double-text.
+  if (hits.some(r => r.state === -2)) return hits.filter(r => r.state === -2 || r.state < 0);
+  return hits;
 }
 
 async function cycle() {
@@ -149,6 +172,7 @@ async function cycle() {
         if (sentThisCycle >= MAX_PER_CYCLE) break;
         const prevState = prev[o.advOrderNo];
         const isNew = prevState === undefined;
+        if (!isNew && prevState !== o._state) noteTransition(dg, o, prevState, o._state);
         const matched = matchRules(rules, o, prevState, isNew);
         if (matched.length === 0) continue;
         dg.lastMatch = { at: Date.now(), advOrderNo: o.advOrderNo, rules: matched.map(r => r.id), isNew, prevState, state: o._state };
@@ -211,4 +235,4 @@ function start() {
 }
 function stop() { if (timer) clearInterval(timer); }
 
-module.exports = { start, stop, status };
+module.exports = { start, stop, status, matchRules };

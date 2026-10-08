@@ -52,20 +52,35 @@ async function fetchQuick(m) {
  * "all orders" until the page's oldest row predates the range (max 6 pages =
  * 600 orders — the dashboard's own range is capped at 8 days anyway).
  */
-async function fetchRange(m, startTime, endTime, maxPages) {
+async function fetchRange(m, startTime, endTime, maxPages = 50) {
   const start = Number(startTime) || 0, end = Number(endTime) || Date.now();
-  // Page budget scales with the range: ~600 orders for a day or two, up to
-  // 2,000 for an event week. Each page costs one gated call (~0.5s).
-  if (!maxPages) { const days = (end - start) / 86400000; maxPages = days > 3 ? 20 : 6; }
-  let all = [];
+  // v75. The old loop stopped as soon as a page came back with fewer than the
+  // 100 rows it asked for. The PDF says pageSize ≤ 100, but nothing proves
+  // BingX honours 100 — if it silently caps at 20, that condition ended the
+  // walk after the first page and "a week ago" could never appear. Now the
+  // walk is driven by BingX's own `total`: keep paging until every order is
+  // in hand or the page's oldest row predates the range, and switch to the
+  // page size BingX actually returned so page offsets stay consistent.
+  const seen = new Set();
+  let all = [], pageSize = 100, total = null, pages = 0, oldest = null, stop = 'end';
   for (let page = 0; page < maxPages; page++) {
-    const { items } = await listPage(m, 0, page, 100);
-    if (items.length === 0) break;
-    all = all.concat(items);
-    const oldest = Math.min(...items.map(o => o.createTime || Infinity));
-    if (oldest < start || items.length < 100) break;
+    const r = await listPage(m, 0, page, pageSize);
+    pages++;
+    if (total === null) total = r.total;
+    if (r.items.length === 0) { stop = 'empty'; break; }
+    if (page === 0 && r.items.length < pageSize && r.items.length < r.total) pageSize = r.items.length; // observed cap
+    for (const o of r.items) if (!seen.has(o.advOrderNo)) { seen.add(o.advOrderNo); all.push(o); }
+    const pageOldest = Math.min(...r.items.map(o => o.createTime || Infinity));
+    if (oldest === null || pageOldest < oldest) oldest = pageOldest;
+    if (pageOldest < start) { stop = 'range'; break; }
+    if (total && all.length >= total) { stop = 'total'; break; }
+    if (page === maxPages - 1) stop = 'budget';
   }
-  return all.filter(o => o.createTime === null || (o.createTime >= start && o.createTime <= end));
+  const items = all.filter(o => o.createTime === null || (o.createTime >= start && o.createTime <= end));
+  // Diagnostics for the panel: what BingX said it has vs. what the walk reached.
+  items.meta = { platform: 'bingx', total, fetched: all.length, pages, pageSize, oldest: Number.isFinite(oldest) ? oldest : null, stop, start, end,
+    truncated: stop === 'budget' };
+  return items;
 }
 
 /** Detail, house-shaped (detail convention: side inverted). */

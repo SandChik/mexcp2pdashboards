@@ -186,6 +186,79 @@ seperti worker lain. Isi notif diperkaya dari detail order (satu panggilan per
 order, cache 15 menit): nama KYC, JUAL/BELI, nominal Rp + USDT, bank & nomor
 rekening penerima (tap-to-copy di Telegram), nomor order.
 
+## v74 — dari dokumentasi resmi MEXC (api-docs/p2p)
+
+- **Banding MEXC** bukan status, tapi bendera: `complaining` (daftar) /
+  `complained` (detail). Sekarang tampil sebagai lencana "⚠ Banding" di
+  Antrian, panel, modal; bunyi + toast saat pertama terlihat; dialog Release
+  memberi peringatan; notifikasi jenis "banding" ikut terpicu.
+- Daftar cepat MEXC memakai endpoint **V2** (`…/order/paginationV2`, scroll
+  pagination, membawa `complaining`); V1 hanya cadangan 10 menit bila V2 gagal.
+- **Verifikasi tambahan** (`overVerify`): order yang menunggu persetujuan lo
+  (`WAIT_PROCESS`) kini berlabel "Verifikasi" dengan teks "setujui/tolak di app
+  MEXC", plus notifikasi jenis "verify". API MEXC belum punya aksi
+  setuju/tolak — permintaan sudah dikirim ke MEXC.
+- Form edit iklan MEXC punya bagian "Verifikasi tambahan buyer" (jenis dokumen,
+  maks 3). MEXC tidak mengembalikan setelan ini lewat API, jadi dashboard
+  mengingatnya per iklan (`backend/data/ad-verify.json`) dan mengirimnya ulang
+  di setiap simpan — edit harga tidak lagi berisiko mematikan verifikasi.
+- iPhone "Add to Home Screen": judul halaman tidak lagi tertutup status bar /
+  Dynamic Island (safe-area di mode standalone).
+
+v75 — riwayat BingX seminggu lalu tidak muncul. Dua sebab, dua perbaikan:
+- Penelusuran halaman berhenti begitu satu halaman berisi kurang dari 100
+  baris. Dokumen bilang pageSize maks 100, tapi kalau BingX diam-diam
+  membatasi (mis. 20), penelusuran berhenti di halaman pertama dan riwayat
+  lama tidak pernah terbaca. Sekarang dipandu `total` dari BingX, ukuran
+  halaman menyesuaikan yang benar-benar dikembalikan, dedupe, batas 50 halaman.
+- Panel bisa membuang permintaan "muat rentang" bila polling 5 detik sedang
+  berjalan (`busyRef`), sehingga ganti tanggal kadang tidak memuat apa pun.
+  Sekarang diantrekan, bukan dibuang (BingX dan MEXC).
+Panel BingX menampilkan baris diagnostik: berapa order dibaca dari total,
+order tertua yang dicapai, dan apakah batas halaman tercapai.
+
+## v76 — akses publik (Funnel), username, satu panel untuk dua platform
+
+- **Login pakai username + password.** Instalasi lama otomatis bernama
+  `admin`; ganti di Settings → Akun (butuh password). Setup pertama kali
+  meminta username. Password minimal 8 karakter.
+- **Rem brute-force di login** (`utils/loginGuard.js`): 5 kali salah dari satu
+  alamat IP → terkunci 15 menit; 30 kali salah dari mana pun → semua terkunci
+  15 menit. Percobaan gagal dicatat di `backend/data/audit.log`
+  (`auth_login_failed`, dengan IP). Server memakai `trust proxy = loopback`,
+  jadi IP asli terbaca lewat `tailscale funnel`/`serve`/nginx di mesin yang sama,
+  tanpa bisa dipalsukan dari luar. Env: `LOGIN_FAILS_PER_IP`, `LOGIN_FAILS_GLOBAL`,
+  `LOGIN_WINDOW_MS`.
+- **Tanpa VPN di HP:** `sudo tailscale serve --bg off && sudo tailscale funnel --bg 3001`
+  membuat alamat `https://…ts.net` yang sama bisa diakses dari internet biasa —
+  langganan push dan PWA tidak perlu dibuat ulang, Tailscale di HP boleh mati
+  (app bank tidak terganggu). Konsekuensinya halaman login terbuka untuk
+  publik: pakai password yang panjang, dan rem di atas yang menjaga.
+- **Satu `MerchantPanel` untuk MEXC dan BingX** (`BingxPanel.jsx` dihapus).
+  Tata letak, statistik, filter sisi/status, kartu order, tombol release, menu
+  ⋮ (catat buyer, auto-reply, pause/resume) kini identik. Yang khusus BingX:
+  sel "Saldo USDT", tombol "Iklan baru", ubah harga cepat di kartu iklan, baris
+  diagnostik rentang. Yang khusus MEXC: "Close merchant (freeze API)" dan
+  snapshot FTD. Setiap panel punya tombol refresh sendiri.
+- **Metode bank di kartu order** (kedua platform): rekening penerima yang
+  dipakai order — SELL = rekening kita yang dibayar buyer, BUY = rekening
+  penjual. Diambil dari detail order dan di-cache bersama nama KYC
+  (`uu-cache.json`, field `bank`); cache lama tanpa `bank` dibaca ulang sekali.
+- **Catatan Buyer:** kolom "Metode" (nama bank) ikut dicatat, diekspor ke CSV,
+  bisa diisi di entri manual dan impor (header `Metode`/`Bank`). Catat buyer
+  kini **jalan juga untuk BingX** (worker 24/7 + panel), sehingga alert "nama
+  sama" menangkap 1 KTP yang dipakai di MEXC dan BingX sekaligus.
+- **Auto-reply "Verifikasi diterima"** — pilihan baru di dropdown status.
+  Bukan status MEXC (enum `OrderDealState` tidak punya "verified"), melainkan
+  perpindahan: order keluar dari `WAIT_PROCESS` ke status apa pun yang bukan
+  gagal (biasanya `NOT_PAID`). Saat aturan ini kena, aturan "Belum bayar" untuk
+  lompatan yang sama tidak ikut dikirim (tidak dobel). Panel status worker
+  menampilkan 6 perpindahan status terakhir sebagai bukti alur sebenarnya.
+- Notifikasi jenis baru **"Verifikasi diterima"** (`verified`, 2→0/3),
+  default ON.
+- Form login/Settings: 401 dari form (password salah) tidak lagi memuat ulang
+  halaman — pesannya tampil.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

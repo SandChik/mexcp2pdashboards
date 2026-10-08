@@ -29,6 +29,12 @@ if (!fs.existsSync(configPath)) {
   }, null, 2));
 }
 
+// Behind a local reverse proxy (tailscale serve/funnel, nginx on the same box)
+// the real client IP arrives in X-Forwarded-For. Trust that header ONLY when
+// the connection itself comes from loopback — a direct remote client can't
+// spoof its way past the login rate limit. (v76)
+app.set('trust proxy', 'loopback');
+
 app.use(cors({ origin: ['http://localhost:3000', 'http://localhost:5173'] }));
 app.use(compression());
 app.use(express.json());
@@ -47,7 +53,7 @@ app.use('/api/autoreply', autoreplyRoutes);
 // Single source of truth for "what is actually running". Shown in Settings and
 // printed at boot, so a stale build can be spotted in seconds instead of by
 // grepping source files on the server.
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v76';
 app.get('/health', (req, res) => res.json({ status: 'ok', version: APP_VERSION, timestamp: Date.now() }));
 
 // Optionally serve the built frontend (frontend/dist) from this same process,

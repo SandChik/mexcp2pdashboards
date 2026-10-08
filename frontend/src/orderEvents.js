@@ -61,6 +61,15 @@ export function announceOrderChanges({ merchantId, merchantName, orders, prevSta
     toast.success(`Order baru — ${merchantName}`, { duration: 4000 });
   }
 
+  // MEXC appeals are a flag (`complaining`), not a state: alert the first time
+  // an order is seen with it, once per order per session.
+  orders.forEach(o => {
+    if (o.complaining === true && shouldAnnounce(`appeal:${merchantId}:${o.advOrderNo}`, 24 * 3600 * 1000)) {
+      playSound('duplicate');
+      toast.error(`⚠ BANDING — ${merchantName}: ${o.userInfo?.nickName || o.advOrderNo}`, { duration: 8000 });
+    }
+  });
+
   // Any difference between this cycle and the last one — state, unread, count
   // — is broadcast so the app-wide queue re-reads immediately instead of at
   // its own next tick. The panels poll every 5s; before this the queue could

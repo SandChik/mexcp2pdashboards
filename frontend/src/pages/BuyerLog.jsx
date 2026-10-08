@@ -54,6 +54,7 @@ export default function BuyerLog() {
     if (query) list = list.filter(r =>
       (r.realName || '').toLowerCase().includes(query) ||
       (r.nickName || '').toLowerCase().includes(query) ||
+      (r.bank || '').toLowerCase().includes(query) ||
       (r.advOrderNo || '').toLowerCase().includes(query));
     if (dupOnly) list = list.filter(r => r._dup);
     return { rows: list, dupNames: dups.size, uniqueNames: Object.keys(counts).length };
@@ -95,10 +96,10 @@ export default function BuyerLog() {
     // Column names match the import template, so an export can be edited in
     // Excel and fed straight back in.
     downloadCsv(`catatan-buyer-${stamp()}.csv`,
-      ['Nama KYC', 'Nickname', 'Merchant', 'Tanggal Selesai', 'Nominal', 'Mata Uang', 'USDT', 'No. Order', 'Catatan', 'Sumber', 'Duplikat'],
+      ['Nama KYC', 'Nickname', 'Merchant', 'Tanggal Selesai', 'Nominal', 'Mata Uang', 'USDT', 'Metode', 'No. Order', 'Catatan', 'Sumber', 'Duplikat'],
       rows.map(r => [r.realName || '', r.nickName || '', merchantName(r.merchantId),
         r.doneAt ? new Date(r.doneAt).toISOString().slice(0, 16).replace('T', ' ') : '',
-        r.amount, r.fiatUnit || '', r.usdt, r.advOrderNo, r.note || '',
+        r.amount, r.fiatUnit || '', r.usdt, r.bank || '', r.advOrderNo, r.note || '',
         r.source || 'order', r._dup ? `ya (${r._dupCount}x)` : 'tidak']));
   }
 
@@ -179,7 +180,7 @@ export default function BuyerLog() {
 
           <div className={card + ' overflow-hidden'}>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[620px]">
+              <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="border-b border-surface-700 text-left text-xs text-surface-300 uppercase tracking-wide">
                   <th className="px-4 py-2.5 font-medium">Nama KYC</th>
@@ -187,6 +188,7 @@ export default function BuyerLog() {
                   <th className="px-4 py-2.5 font-medium">Merchant</th>
                   <th className="px-4 py-2.5 font-medium">Selesai</th>
                   <th className="px-4 py-2.5 font-medium text-right">Nominal</th>
+                  <th className="px-4 py-2.5 font-medium">Metode</th>
                   <th className="px-4 py-2.5 font-medium">Order</th>
                   <th className="px-4 py-2.5 font-medium"></th>
                 </tr>
@@ -207,6 +209,7 @@ export default function BuyerLog() {
                     <td className="px-4 py-2 text-surface-300 text-xs">{merchantName(r.merchantId)}</td>
                     <td className="px-4 py-2 text-surface-200 font-mono text-xs">{fmtDate(r.doneAt)}</td>
                     <td className="px-4 py-2 text-right font-mono text-surface-50">{formatAmount(r.amount, 0)} <span className="text-surface-300 text-xs">{r.fiatUnit}</span></td>
+                    <td className="px-4 py-2 text-surface-200 text-xs truncate max-w-[140px]" title={r.bank || ''}>{r.bank || '—'}</td>
                     <td className="px-4 py-2">
                       <button onClick={() => copyToClipboard(r.advOrderNo, 'No. order')}
                         title={r.advOrderNo} className="flex items-center gap-1 text-[11px] font-mono text-surface-300 hover:text-brand-400 transition-colors">

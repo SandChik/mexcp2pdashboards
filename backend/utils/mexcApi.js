@@ -2,7 +2,7 @@ const axios = require('axios');
 const https = require('https');
 const { buildSignedParams } = require('./signature');
 
-const BASE_URL = 'https://api.mexc.com';
+const BASE_URL = process.env.MEXC_BASE_URL || 'https://api.mexc.com'; // override only for local mock tests
 
 // Keep-alive: reuse TCP+TLS connections to MEXC instead of paying a full
 // handshake (~1-2 RTT) on every one of the hundreds of calls per minute.

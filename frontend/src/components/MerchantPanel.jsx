@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ordersApi, adsApi, merchantApi, chatApi, registryApi } from '../api';
+import { ordersApi, adsApi, merchantApi, registryApi } from '../api';
 import {
   OrderStateBadge, SideBadge, AdStatusBadge, formatTime, formatAmount, formatCompact,
   ORDER_STATES, normalizeState,
@@ -7,21 +7,43 @@ import {
 import { playSound } from '../sounds';
 import { announceOrderChanges } from '../orderEvents';
 import { ingestOrders } from '../actionQueue';
+import { AppealBadge } from './helpers';
 import { actionFor, runAction } from '../actions';
 import { askConfirm } from './confirm';
 import OrderDetailModal from './OrderDetailModal';
 import AdModal from './AdModal';
+import BingxAdModal from './BingxAdModal';
 import {
   Power, MessageSquare, ToggleLeft, ToggleRight, RefreshCw, MoreVertical, Pencil, Clock, AlertTriangle, Pause, Play, UserX, Coins, CheckCircle2,
+  Landmark, WifiOff, Plus, Check, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+/**
+ * ONE merchant panel for both platforms (v76). `merchant.platform` decides the
+ * few places where MEXC and BingX differ; everything else — header, stats,
+ * filters, order rows, the release button, the ads cards, the ⋮ menu — is the
+ * same component, so the two dashboards can never drift apart again.
+ *
+ * Platform differences, all in one place:
+ *   - logo + status dot (MEXC: service switch; BingX: sync health)
+ *   - "Close merchant (freeze API)" — MEXC only, BingX has no such switch
+ *   - Saldo USDT stat cell + "Iklan baru" + inline quick price — BingX only
+ *     (its API can create ads and change a price in one call; MEXC's can't)
+ *   - FTD stat capture — MEXC only (BingX exposes no per-buyer statistics)
+ *   - ad field names (normalized by adView below) and the ad editor modal
+ *   - the "BingX: N dari M order dibaca" range diagnostic line
+ */
+
 const ORDER_FILTERS = [
   { key: 'all',       label: 'Semua',  states: null },
-  { key: 'active',    label: 'Aktif',  states: [0, 1, 2, 3] },
+  { key: 'active',    label: 'Aktif',  states: [0, 1, 2, 3, 9, 10] }, // 9/10 only ever come from BingX
   { key: 'done',      label: 'Selesai',states: [4] },
   { key: 'cancelled', label: 'Batal',  states: [5, 6, 7, 8] },
 ];
+const RUNNING = [0, 1, 2, 3, 9, 10];
+const isRunning = (s) => RUNNING.includes(s);
+const FIXED_END_KINDS = ['custom', 'lastEvent']; // ranges whose end must NOT slide to "now"
 
 function fmtRemaining(ms) {
   if (ms <= 0) return null;
@@ -30,7 +52,31 @@ function fmtRemaining(ms) {
   return h > 0 ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
 }
 
+// The two platforms name ad fields differently; the card reads this instead.
+function adView(ad, isBingx) {
+  if (isBingx) {
+    return {
+      no: ad.advNo, open: ad.advStatus === 'OPEN',
+      price: ad.priceType === 2 ? `${ad.floatRatio}% mengambang` : formatAmount(ad.price, 2),
+      available: formatAmount(ad.availableAmount, 2) + (ad.totalNumber ? ` / ${formatAmount(ad.totalNumber, 2)}` : ''),
+      limit: `${formatCompact(ad.minAmount)}–${formatCompact(ad.maxAmount)}`,
+      pay: ad.payMethodNames?.length ? ad.payMethodNames.join(' · ') : null,
+      hidden: ad.hidePaymentInfo === 1,
+    };
+  }
+  return {
+    no: ad.advNo || ad.davNo, open: ad.advStatus === 'OPEN' || ad.advStatus === 1,
+    price: formatAmount(ad.price, 0),
+    available: formatAmount(ad.availableQuantity, 2),
+    limit: `${formatCompact(ad.minSingleTransAmount)}–${formatCompact(ad.maxSingleTransAmount)}`,
+    pay: null, hidden: false,
+  };
+}
+
 export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRefresh }) {
+  const isBingx = (merchant.platform || 'mexc') === 'bingx';
+  const platformLabel = isBingx ? 'BingX' : 'MEXC';
+
   const [orders, setOrders]           = useState([]);
   const [ads, setAds]                 = useState([]);
   const [loading, setLoading]         = useState(true);
@@ -49,6 +95,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const [orderSide, setOrderSide]     = useState('ALL');
   const [adFilter, setAdFilter]       = useState('ALL');
   const [togglingAd, setTogglingAd]   = useState(null);
+  const [priceEdit, setPriceEdit]     = useState(null); // BingX: { advNo, value } while the inline price box is open
   const [menuOpen, setMenuOpen]       = useState(false);
   const [pausedAds, setPausedAds]     = useState([]);
   const [busyTrading, setBusyTrading] = useState(false);
@@ -61,7 +108,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const autoReplyEnabledRef = useRef(true);
   useEffect(() => { autoReplyEnabledRef.current = autoReplyEnabled; }, [autoReplyEnabled]);
-  const [nameMap, setNameMap]         = useState({}); // advOrderNo -> { realName, memberId }
+  const [nameMap, setNameMap]         = useState({}); // advOrderNo -> { realName, memberId, bank }
+  const [balance, setBalance]         = useState(null); // BingX: { free, locked, source } from the fund account
+  const [rangeMeta, setRangeMeta]     = useState(null); // BingX: what the range walk actually fetched
 
   const prevStates  = useRef({});
   const prevUnread  = useRef({});
@@ -109,15 +158,16 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     return () => clearInterval(t);
   }, [buyerLog, loadNameIndex]);
 
-  // Resolve KYC names (cached server-side) for every order — shown on each row.
+  // Resolve KYC names + receiving bank (cached server-side) for every order —
+  // shown on each row.
   useEffect(() => {
     if (orders.length === 0) return;
     // Active orders first: their name matters for the duplicate alert BEFORE
     // release. Capped so a 150-order range can't dump 150 fetches into the gate.
     const pending = orders.filter(o => o.advOrderNo && !(o.advOrderNo in nameMapRef.current));
-    const active = pending.filter(o => [0, 1, 2, 3].includes(o._state));
-    const rest = pending.filter(o => ![0, 1, 2, 3].includes(o._state));
-    const missing = active.concat(rest).slice(0, 30).map(o => o.advOrderNo);
+    const active = pending.filter(o => isRunning(o._state));
+    const rest = pending.filter(o => !isRunning(o._state));
+    const missing = active.concat(rest).slice(0, isBingx ? 20 : 30).map(o => o.advOrderNo);
     if (missing.length === 0) return;
     let cancelled = false;
     ordersApi.memberIds(merchant.id, missing).then(r => {
@@ -126,39 +176,52 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       setNameMap(prev => { const next = { ...prev, ...map }; nameMapRef.current = next; return next; });
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [orders, merchant.id]);
+  }, [orders, merchant.id, isBingx]);
 
   // Remembered pause state for this merchant
   useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
 
+  // BingX: fund-account balance for the Saldo cell (and after every release)
+  const fetchBalance = useCallback(() => {
+    if (!isBingx) return;
+    merchantApi.balance(merchant.id).then(r => setBalance(r.data || null)).catch(() => {});
+  }, [merchant.id, isBingx]);
+  useEffect(() => { if (!isBingx) return; fetchBalance(); const t = setInterval(fetchBalance, 30000); return () => clearInterval(t); }, [fetchBalance, isBingx]);
+
   // 1s tick driving the countdown badges
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
 
+  const pendingFullRef = useRef(false);
   const doFetch = useCallback(async (quiet = false, quick = false) => {
-    if (busyRef.current) return;
+    if (busyRef.current) { if (!quick) pendingFullRef.current = true; return; } // queue a full fetch instead of dropping it (v75)
     busyRef.current = true;
     if (!quiet) setRefreshing(true);
     try {
+      const fixedEnd = FIXED_END_KINDS.includes(rangeRef.current.kind);
       const params = {
         startTime: rangeRef.current.startTime,
         // Live presets (today/event/3d/7d) must always query up to NOW, or new
         // orders created after the dashboard opened fall outside the window and
-        // never get detected. Only a fixed custom range uses its chosen end.
-        endTime: rangeRef.current.kind === 'custom' ? rangeRef.current.endTime : Date.now(),
+        // never get detected. Only a fixed range uses its chosen end.
+        endTime: fixedEnd ? rangeRef.current.endTime : Date.now(),
       };
       const r = quick
         ? await ordersApi.marketQuick(merchant.id, params)
         : await ordersApi.market(merchant.id, params);
       const raw = r.data;
       const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-      let normalized = list.map(o => ({ ...o, _state: normalizeState(o.state) }));
+      if (isBingx && !quick) setRangeMeta(raw?.meta || null);
+      let normalized = list.map(o => (isBingx
+        ? { ...o, _state: normalizeState(o.state), platform: 'bingx' }
+        : { ...o, _state: normalizeState(o.state) }));
       if (quick) {
-        // Merge: fresh rows win; anything outside the 24h window is carried
+        // Merge: fresh rows win; anything outside the quick window is carried
         // over untouched, then clipped to the selected range.
         const fresh = new Set(normalized.map(o => o.advOrderNo));
         const kept = ordersRef.current.filter(o => !fresh.has(o.advOrderNo));
+        const endCap = fixedEnd ? rangeRef.current.endTime : Infinity;
         normalized = normalized.concat(kept)
-          .filter(o => (o.createTime || 0) >= rangeRef.current.startTime)
+          .filter(o => (o.createTime || 0) >= rangeRef.current.startTime && (o.createTime || 0) <= endCap)
           .sort((a, b) => (b.createTime || 0) - (a.createTime || 0));
       }
 
@@ -166,7 +229,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       // sees a change first announces it and the other stays quiet.
       const { states: ns, unread: nu } = announceOrderChanges({
         merchantId: merchant.id,
-        merchantName: merchant.name,
+        merchantName: isBingx ? `${merchant.name} (BingX)` : merchant.name,
         orders: normalized,
         prevStates: prevStates.current,
         prevUnread: prevUnread.current,
@@ -174,18 +237,19 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
       ordersRef.current = normalized;
-      ingestOrders(merchant.id, merchant.name, 'mexc', normalized); // queue sees it the same instant (v66)
+      ingestOrders(merchant.id, merchant.name, isBingx ? 'bingx' : 'mexc', normalized); // queue sees it the same instant (v66)
       setOrders(normalized); setLastSync(Date.now()); setSyncError(false); syncErrorRef.current = false;
     } catch (e) {
       // Sound only on the transition into an error state, not every 5s poll.
       if (!syncErrorRef.current) playSound('error');
       syncErrorRef.current = true;
       setSyncError(true);
-      if (!quiet) toast.error(`Gagal memuat order — ${merchant.name}. Cek koneksi atau API key.`);
+      if (!quiet) toast.error(`Gagal memuat order ${platformLabel} — ${merchant.name}. ${e.response?.data?.error || 'Cek koneksi atau API key.'}`);
     } finally {
       setLoading(false); setRefreshing(false); busyRef.current = false;
+      if (pendingFullRef.current) { pendingFullRef.current = false; doFetch(false, false); }
     }
-  }, [merchant.id, merchant.name]);
+  }, [merchant.id, merchant.name, isBingx, platformLabel]);
 
   const fetchAds = useCallback(async () => {
     try {
@@ -195,8 +259,10 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     } catch { /* keep last */ }
   }, [merchant.id]);
 
-  // Snapshot buyer trade stats for in-progress SELL orders (MEXC drops them once DONE)
+  // Snapshot buyer trade stats for in-progress SELL orders (MEXC drops them
+  // once DONE). MEXC only — BingX has no such statistics.
   useEffect(() => {
+    if (isBingx) return;
     const toCapture = orders
       .filter(o => o.side === 'SELL' && [0, 1, 2, 3].includes(o._state) && o.advOrderNo && !capturedRef.current.has(o.advOrderNo))
       .map(o => o.advOrderNo);
@@ -225,7 +291,8 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
 
   useEffect(() => {
     initialized.current = false; prevStates.current = {}; prevUnread.current = {};
-    setOrders([]); setLoading(true);
+    ordersRef.current = []; // rows from the previous range must not be carried into the new one
+    setOrders([]); setLoading(true); setRangeMeta(null);
     doFetch(false); fetchAds();
   }, [merchant.id, dateRange]); // eslint-disable-line
 
@@ -250,21 +317,21 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     const f = ORDER_FILTERS.find(f => f.key === orderFilter);
     return !f?.states || f.states.includes(o._state);
   }).slice().sort((a, b) => {
-    const aActive = [0, 1, 2, 3].includes(a._state), bActive = [0, 1, 2, 3].includes(b._state);
+    const aActive = isRunning(a._state), bActive = isRunning(b._state);
     if (aActive && bActive) return (a.payTimeLimit || Infinity) - (b.payTimeLimit || Infinity); // soonest deadline first
     if (aActive !== bActive) return aActive ? -1 : 1; // active first
     return (b.createTime || 0) - (a.createTime || 0); // newest first
   });
-  const activeOrders = orders.filter(o => [0, 1, 2, 3].includes(o._state));
+  const activeOrders = orders.filter(o => isRunning(o._state));
   const unread = orders.reduce((a, o) => a + (o.unreadCount || 0), 0);
-  const liveAds = ads.filter(a => a.advStatus === 'OPEN' || a.advStatus === 1);
+  const liveAds = ads.filter(a => adView(a, isBingx).open);
   const filteredAds = adFilter === 'ALL' ? ads : ads.filter(a => a.side === adFilter);
 
   const doneOrders = orders.filter(o => o._state === 4);
   const volBuy     = doneOrders.filter(o => o.side === 'BUY').reduce((s, o) => s + (parseFloat(o.amount) || 0), 0);
   const volSell    = doneOrders.filter(o => o.side === 'SELL').reduce((s, o) => s + (parseFloat(o.amount) || 0), 0);
   const volSellUsdt = doneOrders.filter(o => o.side === 'SELL').reduce((s, o) => s + (parseFloat(o.tradableQuantity) || 0), 0);
-  const fiatUnit = orders[0]?.fiatUnit || 'IDR';
+  const fiatUnit = orders[0]?.fiatUnit || ads[0]?.fiatUnit || 'IDR';
   const FAILED_STATES = new Set([5, 6, 7, 8]); // CANCEL, INVALID, REFUSE, TIMEOUT — never completed, shouldn't count toward duplicate-buyer detection
   const normName = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
   // In-view counts (catches two ACTIVE orders with the same KYC name before either completes)
@@ -312,7 +379,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         // Quick merge, NOT a full range refetch — a full "event week" fetch is
         // dozens of low-priority requests (3-6s). The just-changed order is in
         // the newest 24h by definition, so quick always sees it.
-        doFetch(false, true);
+        doFetch(false, true); fetchBalance();
       }
     } finally { setRowBusy(null); }
   }
@@ -331,7 +398,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     catch { setAutoReplyEnabled(!v); toast.error('Failed to save setting'); }
   }
 
+  // MEXC needs the whole ad echoed back on a status change; BingX takes the id.
   function buildAdParams(ad) {
+    if (isBingx) return { advNo: ad.advNo };
     return {
       advNo: ad.advNo || ad.davNo, side: ad.side, fiatUnit: ad.fiatUnit, coinId: ad.coinId, price: ad.price,
       availableQuantity: ad.availableQuantity,
@@ -350,19 +419,35 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     const r = await adsApi.toggleStatus(merchant.id, buildAdParams(ad), status);
     return r.data || {};
   }
-  const isCooldown = (d) => d.cooldown || d.code === 30014 || d.code === 30020;
+  const isCooldown = (d) => !isBingx && (d.cooldown || d.code === 30014 || d.code === 30020);
 
   async function toggleAdStatus(ad, e) {
     e.stopPropagation();
-    const isOpen = ad.advStatus === 'OPEN' || ad.advStatus === 1;
-    const adNo = ad.advNo || ad.davNo;
-    setTogglingAd(adNo);
+    const v = adView(ad, isBingx);
+    setTogglingAd(v.no);
     try {
-      const d = await setAdStatus(ad, isOpen ? 'CLOSE' : 'OPEN');
-      if (d.code === 0) { toast.success(isOpen ? 'Ad paused' : 'Ad live'); fetchAds(); }
+      const d = await setAdStatus(ad, v.open ? 'CLOSE' : 'OPEN');
+      if (d.code === 0) { toast.success(v.open ? 'Ad paused' : 'Ad live'); fetchAds(); }
       else if (isCooldown(d)) toast.error('MEXC rate limit: wait ~60s before changing this ad again', { duration: 6000 });
-      else toast.error(`Can't activate: ${d.msg || 'unknown error'}${d.code ? ` (code ${d.code})` : ''}`, { duration: 8000 });
-    } catch (err) { toast.error(err.response?.data?.error || err.message); }
+      else toast.error(`Can't ${v.open ? 'pause' : 'activate'}: ${d.msg || 'unknown error'}${d.code ? ` (code ${d.code})` : ''}`, { duration: 8000 });
+    } catch (err) { toast.error(err.response?.data?.error || err.response?.data?.msg || err.message); }
+    finally { setTogglingAd(null); }
+  }
+
+  // BingX only: one modifyPrice call straight from the card.
+  async function saveQuickPrice(ad) {
+    if (!priceEdit || priceEdit.advNo !== ad.advNo) return;
+    const v = String(priceEdit.value).trim();
+    if (!(Number(v) > 0)) { toast.error('Harga harus angka lebih dari 0'); return; }
+    if (v === String(ad.priceType === 2 ? ad.floatRatio : ad.price)) { setPriceEdit(null); return; }
+    setTogglingAd(ad.advNo);
+    try {
+      const r = await adsApi.setPrice(merchant.id, ad.priceType === 2
+        ? { advNo: ad.advNo, priceType: 2, floatRatio: v }
+        : { advNo: ad.advNo, priceType: 1, fixedPrice: v });
+      if (r.data?.code === 0) { toast.success(`Harga → ${v}${ad.priceType === 2 ? '%' : ''}`); setPriceEdit(null); fetchAds(); }
+      else toast.error(`BingX menolak: ${r.data?.msg || 'error'}`);
+    } catch (e) { toast.error(e.response?.data?.msg || e.message); }
     finally { setTogglingAd(null); }
   }
 
@@ -380,13 +465,14 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       // Use what's on screen (includes an ad you just enabled) instead of
       // re-fetching, because MEXC's ad list lags right after a toggle.
       const current = ads.length ? ads : await freshAds();
-      const openAds = current.filter(a => a.advStatus === 'OPEN' || a.advStatus === 1);
+      const openAds = current.filter(a => adView(a, isBingx).open);
       if (openAds.length === 0) { toast.error(`${merchant.name}: no live ads to pause`, { id: tid }); return; }
       const okToPause = await askConfirm({ title: `Pause trading — ${merchant.name}`, message: `This closes all ${openAds.length} live ad(s) and remembers them. Resume turns them back on.`, confirmText: 'Pause all ads', danger: true });
       if (!okToPause) { toast.dismiss(tid); return; }
       const closed = [], failed = [];
       for (const ad of openAds) {
-        try { const d = await setAdStatus(ad, 'CLOSE'); if (d.code === 0) closed.push(ad.advNo || ad.davNo); else failed.push({ price: ad.price, msg: isCooldown(d) ? 'wait ~60s (edited too recently)' : (d.msg || 'error') }); }
+        const no = adView(ad, isBingx).no;
+        try { const d = await setAdStatus(ad, 'CLOSE'); if (d.code === 0) closed.push(no); else failed.push({ price: ad.price, msg: isCooldown(d) ? 'wait ~60s (edited too recently)' : (d.msg || 'error') }); }
         catch { failed.push({ price: ad.price, msg: 'request failed' }); }
       }
       try { await merchantApi.setPauseState(merchant.id, true, closed); } catch { /* */ }
@@ -405,13 +491,13 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       let snapshot = pausedAds, pausedAt = 0;
       try { const r = await merchantApi.getPauseState(merchant.id); snapshot = r.data?.ads || pausedAds; pausedAt = r.data?.pausedAt || 0; } catch { /* */ }
       const current = await freshAds();
-      const targets = current.filter(a => snapshot.includes(a.advNo || a.davNo));
+      const targets = current.filter(a => snapshot.includes(adView(a, isBingx).no));
       if (targets.length === 0) {
         await merchantApi.setPauseState(merchant.id, false, []).catch(() => {});
         setPausedAds([]); toast.error(`${merchant.name}: no paused ads found to resume`, { id: tid }); return;
       }
       // MEXC blocks editing an ad <60s after the last change — wait it out automatically.
-      const until = pausedAt ? pausedAt + 60000 : 0;
+      const until = !isBingx && pausedAt ? pausedAt + 60000 : 0;
       while (until && Date.now() < until) {
         const sec = Math.ceil((until - Date.now()) / 1000);
         toast.loading(`Cooldown — opening in ${sec}s...`, { id: tid });
@@ -420,7 +506,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       toast.loading(`Resuming ${merchant.name}...`, { id: tid });
       const failedNos = [], failed = []; let ok = 0;
       for (const ad of targets) {
-        const no = ad.advNo || ad.davNo;
+        const no = adView(ad, isBingx).no;
         try {
           const d = await setAdStatus(ad, 'OPEN');
           if (d.code === 0) ok++;
@@ -436,6 +522,21 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   }
 
   const syncLabel = syncError ? 'gagal sync' : lastSync ? `sync ${new Date(lastSync).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : '';
+  const dotClass = isBingx
+    ? (syncError ? 'bg-sell' : 'bg-buy shadow-glow-buy animate-pulse')
+    : (serviceOpen ? 'bg-buy shadow-glow-buy animate-pulse' : 'bg-sell');
+
+  const statCells = [
+    ...(isBingx ? [{
+      label: 'Saldo USDT',
+      value: balance === null ? '…' : (balance.free === null ? 'n/a' : formatAmount(balance.free, 2)),
+      color: 'text-buy', bar: 'bg-buy',
+      title: balance?.error ? `Saldo tidak terbaca: ${balance.error}` : (balance?.source ? `Akun ${balance.source}${Number(balance.locked) > 0 ? ` · terkunci ${formatAmount(balance.locked, 2)}` : ''}` : ''),
+    }] : []),
+    { label: `Buy (${fiatUnit})`, value: formatAmount(volBuy, 0), color: 'text-buy', bar: 'bg-buy' },
+    { label: `Sell (${fiatUnit})`, value: formatAmount(volSell, 0), color: 'text-sell', bar: 'bg-sell' },
+    { label: 'Sell (USDT)', value: formatAmount(volSellUsdt, 2), color: 'text-surface-50', bar: 'bg-brand-400' },
+  ];
 
   return (
     <div className="card flex flex-col h-full overflow-hidden">
@@ -444,48 +545,59 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       <div className="px-3 sm:px-3.5 pt-3 pb-3 border-b border-surface-700">
         <div className="flex items-center justify-between h-6">
           <div className="flex items-center gap-2 min-w-0">
-            <img src="/brand/mexc.png" alt="MEXC" className="w-5 h-5 rounded-md flex-shrink-0 bg-white" />
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${serviceOpen ? 'bg-buy shadow-glow-buy animate-pulse' : 'bg-sell'}`} />
+            <img src={isBingx ? '/brand/bingx.png' : '/brand/mexc.png'} alt={platformLabel} className="w-5 h-5 rounded-md flex-shrink-0 bg-white" />
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotClass}`} />
             <span className="font-semibold text-surface-50 text-sm truncate">{merchant.name}</span>
             {refreshing && <RefreshCw size={11} className="text-brand-400 animate-spin flex-shrink-0" />}
+            {syncError && <span className="flex items-center gap-1 bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0"><WifiOff size={11} /> sync gagal</span>}
             {unread > 0 && <span className="bg-sell/15 text-sell text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{unread} belum dibaca</span>}
             {pausedAds.length > 0 && <span className="bg-warning/15 text-warning text-xs rounded px-1.5 py-0.5 font-medium flex-shrink-0">{pausedAds.length} dijeda</span>}
           </div>
-          <div className="relative flex-shrink-0" ref={menuRef}>
-            <button onClick={() => setMenuOpen(m => !m)}
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button onClick={() => { doFetch(false); fetchAds(); fetchBalance(); }} title="Refresh panel ini"
               className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:text-surface-50 hover:bg-surface-700 transition-colors">
-              <MoreVertical size={15} />
+              <RefreshCw size={14} />
             </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-8 z-20 w-52 bg-surface-800 border border-surface-700 rounded-lg p-1 shadow-xl shadow-black/40">
-                <button onClick={toggleBuyerLog}
-                  className={`w-full flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 transition-colors ${buyerLog ? 'text-brand-400 hover:bg-brand-500/10' : 'text-surface-200 hover:bg-surface-700'}`}>
-                  <span className="flex items-center gap-2"><UserX size={13} /> Catat buyer & alert nama</span>
-                  <span className={`text-[10px] font-semibold ${buyerLog ? 'text-brand-400' : 'text-surface-300'}`}>{buyerLog ? 'ON' : 'OFF'}</span>
-                </button>
-                <button onClick={toggleAutoReplyForMerchant}
-                  className={`w-full flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 transition-colors ${autoReplyEnabled ? 'text-brand-400 hover:bg-brand-500/10' : 'text-surface-200 hover:bg-surface-700'}`}>
-                  <span className="flex items-center gap-2"><MessageSquare size={13} /> Auto-reply</span>
-                  <span className={`text-[10px] font-semibold ${autoReplyEnabled ? 'text-brand-400' : 'text-surface-300'}`}>{autoReplyEnabled ? 'ON' : 'OFF'}</span>
-                </button>
-                <div className="h-px bg-surface-700 my-1" />
-                <button onClick={pauseTrading} disabled={busyTrading}
-                  className="w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors disabled:opacity-40 text-warning hover:bg-warning/10">
-                  {busyTrading ? <RefreshCw size={13} className="animate-spin" /> : <Pause size={13} />} Pause trading
-                </button>
-                {pausedAds.length > 0 && (
-                  <button onClick={resumeTrading} disabled={busyTrading}
-                    className="w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors disabled:opacity-40 text-buy hover:bg-buy/10">
-                    <Play size={13} /> Resume {pausedAds.length} ad(s)
+            <div className="relative" ref={menuRef}>
+              <button onClick={() => setMenuOpen(m => !m)}
+                className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:text-surface-50 hover:bg-surface-700 transition-colors">
+                <MoreVertical size={15} />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-8 z-20 w-52 bg-surface-800 border border-surface-700 rounded-lg p-1 shadow-xl shadow-black/40">
+                  <button onClick={toggleBuyerLog}
+                    className={`w-full flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 transition-colors ${buyerLog ? 'text-brand-400 hover:bg-brand-500/10' : 'text-surface-200 hover:bg-surface-700'}`}>
+                    <span className="flex items-center gap-2"><UserX size={13} /> Catat buyer & alert nama</span>
+                    <span className={`text-[10px] font-semibold ${buyerLog ? 'text-brand-400' : 'text-surface-300'}`}>{buyerLog ? 'ON' : 'OFF'}</span>
                   </button>
-                )}
-                <div className="h-px bg-surface-700 my-1" />
-                <button onClick={toggleService}
-                  className={`w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors ${serviceOpen ? 'text-sell hover:bg-sell/10' : 'text-buy hover:bg-buy/10'}`}>
-                  <Power size={13} /> {serviceOpen ? 'Close merchant (freeze API)' : 'Open merchant'}
-                </button>
-              </div>
-            )}
+                  <button onClick={toggleAutoReplyForMerchant}
+                    className={`w-full flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 transition-colors ${autoReplyEnabled ? 'text-brand-400 hover:bg-brand-500/10' : 'text-surface-200 hover:bg-surface-700'}`}>
+                    <span className="flex items-center gap-2"><MessageSquare size={13} /> Auto-reply</span>
+                    <span className={`text-[10px] font-semibold ${autoReplyEnabled ? 'text-brand-400' : 'text-surface-300'}`}>{autoReplyEnabled ? 'ON' : 'OFF'}</span>
+                  </button>
+                  <div className="h-px bg-surface-700 my-1" />
+                  <button onClick={pauseTrading} disabled={busyTrading}
+                    className="w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors disabled:opacity-40 text-warning hover:bg-warning/10">
+                    {busyTrading ? <RefreshCw size={13} className="animate-spin" /> : <Pause size={13} />} Pause trading
+                  </button>
+                  {pausedAds.length > 0 && (
+                    <button onClick={resumeTrading} disabled={busyTrading}
+                      className="w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors disabled:opacity-40 text-buy hover:bg-buy/10">
+                      <Play size={13} /> Resume {pausedAds.length} ad(s)
+                    </button>
+                  )}
+                  {!isBingx && (
+                    <>
+                      <div className="h-px bg-surface-700 my-1" />
+                      <button onClick={toggleService}
+                        className={`w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors ${serviceOpen ? 'text-sell hover:bg-sell/10' : 'text-buy hover:bg-buy/10'}`}>
+                        <Power size={13} /> {serviceOpen ? 'Close merchant (freeze API)' : 'Open merchant'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -499,13 +611,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         </div>
 
         {/* Volume — full numbers, fixed-height cells so panels stay aligned */}
-        <div className="grid grid-cols-3 gap-2 mt-2.5">
-          {[
-            { label: `Buy (${fiatUnit})`, value: formatAmount(volBuy, 0), color: 'text-buy', bar: 'bg-buy' },
-            { label: `Sell (${fiatUnit})`, value: formatAmount(volSell, 0), color: 'text-sell', bar: 'bg-sell' },
-            { label: 'Sell (USDT)', value: formatAmount(volSellUsdt, 2), color: 'text-surface-50', bar: 'bg-brand-400' },
-          ].map(s => (
-            <div key={s.label} className="relative bg-surface-900 border border-surface-700 rounded-lg px-2 py-1.5 h-[54px] flex flex-col justify-center overflow-hidden">
+        <div className={`grid gap-2 mt-2.5 ${isBingx ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+          {statCells.map(s => (
+            <div key={s.label} title={s.title || undefined} className="relative bg-surface-900 border border-surface-700 rounded-lg px-2 py-1.5 h-[54px] flex flex-col justify-center overflow-hidden">
               <span className={`absolute left-0 top-2 bottom-2 w-[2px] rounded-full ${s.bar}`} />
               <p className="text-[10px] uppercase tracking-wide text-surface-300 truncate pl-1.5">{s.label}</p>
               <p className={`text-sm font-mono font-semibold tnum whitespace-nowrap overflow-hidden pl-1.5 ${s.color}`}>{s.value}</p>
@@ -534,13 +642,28 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       </div>
 
       {tab === 'orders' && (
-        <div className="flex items-center gap-1 px-3 sm:px-3.5 py-2 border-b border-surface-700 overflow-x-auto no-scrollbar">
-          {ORDER_FILTERS.map(f => (
-            <button key={f.key} onClick={() => setOrderFilter(f.key)}
-              className={`tap-sm flex-shrink-0 text-xs px-2.5 py-1 rounded-lg transition-colors ${orderFilter === f.key ? 'bg-surface-700 text-surface-50 ring-1 ring-surface-600' : 'text-surface-300 hover:text-surface-50'}`}>
-              {f.label}{filterCounts[f.key] > 0 ? <span className="ml-1 text-surface-300">{filterCounts[f.key]}</span> : ''}
-            </button>
-          ))}
+        <div className="px-3 sm:px-3.5 py-2 border-b border-surface-700">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            {ORDER_FILTERS.map(f => (
+              <button key={f.key} onClick={() => setOrderFilter(f.key)}
+                className={`tap-sm flex-shrink-0 text-xs px-2.5 py-1 rounded-lg transition-colors ${orderFilter === f.key ? 'bg-surface-700 text-surface-50 ring-1 ring-surface-600' : 'text-surface-300 hover:text-surface-50'}`}>
+                {f.label}{filterCounts[f.key] > 0 ? <span className="ml-1 text-surface-300">{filterCounts[f.key]}</span> : ''}
+              </button>
+            ))}
+          </div>
+          {isBingx && rangeMeta && (
+            // What BingX actually handed over for this range — the honest answer
+            // to "why is last week missing": either BingX only has N orders in
+            // total, or the walk hit its page budget.
+            <p className={`text-[10px] font-mono mt-1.5 ${rangeMeta.truncated ? 'text-warning' : 'text-surface-300/80'}`}
+              title={`stop=${rangeMeta.stop} · halaman ${rangeMeta.pages} × ${rangeMeta.pageSize}`}>
+              BingX: {rangeMeta.fetched}{rangeMeta.total ? ` dari ${rangeMeta.total}` : ''} order dibaca
+              {rangeMeta.oldest ? ` · tertua ${formatTime(rangeMeta.oldest)}` : ''}
+              {rangeMeta.truncated ? ' · batas halaman tercapai, riwayat lebih lama tidak dimuat' : ''}
+              {!rangeMeta.truncated && rangeMeta.total && rangeMeta.fetched >= rangeMeta.total && rangeMeta.oldest && rangeMeta.oldest > rangeMeta.start
+                ? ' · BingX tidak punya order lebih lama dari ini' : ''}
+            </p>
+          )}
         </div>
       )}
 
@@ -553,16 +676,17 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         ) : tab === 'orders' ? (
           filteredOrders.length === 0 ? (
             <div className="text-center py-12 px-6">
-              <p className="text-sm text-surface-200">{orders.length === 0 ? 'Belum ada order pada rentang ini.' : 'Tidak ada order dengan filter ini.'}</p>
+              <p className="text-sm text-surface-200">{orders.length === 0 ? `Belum ada order ${isBingx ? 'BingX ' : ''}pada rentang ini.` : 'Tidak ada order dengan filter ini.'}</p>
               <p className="text-xs text-surface-300 mt-1">{orders.length === 0 ? 'Coba ubah rentang tanggal di kanan atas.' : 'Pilih filter lain untuk melihat order yang ada.'}</p>
             </div>
           ) : filteredOrders.map(order => {
             const amtColor = order.side === 'BUY' ? 'text-buy' : 'text-sell';
-            const isActive = [0, 1, 2, 3].includes(order._state);
+            const isActive = isRunning(order._state);
             const remaining = isActive && order.payTimeLimit ? order.payTimeLimit - now : 0;
             const countdown = fmtRemaining(remaining);
             const urgent = countdown && remaining < 5 * 60 * 1000;
             const dup = buyerLog ? dupInfo(order.advOrderNo) : null;
+            const info = nameMap[order.advOrderNo];
             return (
               <div key={order.advOrderNo}
                 className={`border-b border-surface-700/60 hover:bg-surface-900/60 transition-colors border-l-2 ${
@@ -570,16 +694,17 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                 <button onClick={() => setSelectedOrder(order.advOrderNo)} className="w-full px-3 sm:px-3.5 py-3 text-left">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 mb-1.5">
+                      <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
                         <SideBadge side={order.side} />
                         <OrderStateBadge state={order._state} />
-                      {order.unreadCount > 0 && (
-                        <button onClick={e => { e.stopPropagation(); setOpenChatOrder(order.advOrderNo); }}
-                          title={`${order.unreadCount} pesan belum dibaca — buka chat`}
-                          className="inline-flex items-center gap-0.5 text-[11px] font-semibold rounded-md px-1.5 py-0.5 bg-sell/15 text-sell hover:bg-sell/25 transition-colors">
-                          <MessageSquare size={10} />{order.unreadCount}
-                        </button>
-                      )}
+                        {order.complaining === true && <AppealBadge />}
+                        {order.unreadCount > 0 && (
+                          <button onClick={e => { e.stopPropagation(); setOpenChatOrder(order.advOrderNo); }}
+                            title={`${order.unreadCount} pesan belum dibaca — buka chat`}
+                            className="inline-flex items-center gap-0.5 text-[11px] font-semibold rounded-md px-1.5 py-0.5 bg-sell/15 text-sell hover:bg-sell/25 transition-colors">
+                            <MessageSquare size={10} />{order.unreadCount}
+                          </button>
+                        )}
                         {dup && (
                           <span className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full pl-1.5 pr-2 py-0.5 bg-sell/15 text-sell ring-1 ring-sell/30"
                             title={`Nama KYC "${dup.name}" tercatat di ${dup.count} order (termasuk riwayat di Catatan Buyer) — kemungkinan 1 KTP banyak akun`}>
@@ -593,9 +718,15 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                         )}
                       </div>
                       <p className="text-xs text-surface-200 truncate">{order.userInfo?.nickName || 'Unknown'}</p>
-                      {nameMap[order.advOrderNo]?.realName && (
+                      {info?.realName && (
                         <p className={`text-xs truncate ${dup ? 'text-sell font-medium' : 'text-surface-100'}`}>
-                          {nameMap[order.advOrderNo].realName}
+                          {info.realName}
+                        </p>
+                      )}
+                      {/* v76: the receiving bank (SELL = ours the buyer pays into; BUY = theirs) */}
+                      {info?.bank && (
+                        <p className="flex items-center gap-1 text-[11px] text-surface-300 truncate" title={order.side === 'SELL' ? 'Rekening penerima (milik kita) yang dipakai order ini' : 'Rekening penjual yang harus dibayar'}>
+                          <Landmark size={10} className="flex-shrink-0" /><span className="truncate">{info.bank}</span>
                         </p>
                       )}
                       <p className="text-[11px] text-surface-300/70 font-mono mt-0.5">{formatTime(order.createTime)}</p>
@@ -632,48 +763,84 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
             );
           })
         ) : (
-          filteredAds.length === 0 ? (
-            <div className="text-center py-12 px-6">
-              <p className="text-sm text-surface-200">Belum ada iklan.</p>
-              <p className="text-xs text-surface-300 mt-1">Buat iklan lewat aplikasi MEXC, lalu refresh panel ini.</p>
-            </div>
-          ) : (
-            <div className="p-2.5 sm:p-3 space-y-2.5">
-              {filteredAds.map(ad => {
-                const adNo = ad.advNo || ad.davNo;
-                const isOpen = ad.advStatus === 'OPEN' || ad.advStatus === 1;
-                return (
-                  <div key={adNo} className={`bg-surface-900 border rounded-xl p-3 transition-all card-hover ${isOpen ? 'border-surface-700' : 'border-surface-700/50 opacity-60'}`}>
-                    <div className="flex items-center justify-between mb-2.5">
-                      <div className="flex items-center gap-1.5"><SideBadge side={ad.side} /><AdStatusBadge status={ad.advStatus} /></div>
-                      <button onClick={e => toggleAdStatus(ad, e)} disabled={togglingAd === adNo} title={isOpen ? 'Pause ad' : 'Activate ad'}
-                        className={`transition-colors disabled:opacity-40 ${isOpen ? 'text-buy hover:text-sell' : 'text-surface-300 hover:text-buy'}`}>
-                        {togglingAd === adNo ? <RefreshCw size={18} className="animate-spin" /> : isOpen ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
-                      </button>
+          <div className="p-2.5 sm:p-3 space-y-2.5">
+            {isBingx && (
+              <button onClick={() => { setEditAd(null); setShowAdModal(true); }}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg h-9 border border-dashed border-surface-600 text-surface-200 hover:text-surface-50 hover:border-surface-500 transition-colors">
+                <Plus size={13} /> Iklan baru
+              </button>
+            )}
+            {filteredAds.length === 0 ? (
+              <div className="text-center py-12 px-6">
+                <p className="text-sm text-surface-200">Belum ada iklan.</p>
+                <p className="text-xs text-surface-300 mt-1">{isBingx ? 'Buat dari tombol di atas — langsung tayang di pasar BingX.' : 'Buat iklan lewat aplikasi MEXC, lalu refresh panel ini.'}</p>
+              </div>
+            ) : filteredAds.map(ad => {
+              const v = adView(ad, isBingx);
+              const busy = togglingAd === v.no;
+              const editing = isBingx && priceEdit?.advNo === v.no;
+              return (
+                <div key={v.no} className={`bg-surface-900 border rounded-xl p-3 transition-all card-hover ${v.open ? 'border-surface-700' : 'border-surface-700/50 opacity-60'}`}>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <SideBadge side={ad.side} /><AdStatusBadge status={ad.advStatus} />
+                      {pausedAds.includes(v.no) && <span className="text-[10px] text-warning">dijeda</span>}
                     </div>
-                    <div className="flex items-baseline justify-between mb-2">
-                      <span className="text-lg font-mono font-semibold text-surface-50">{formatAmount(ad.price, 0)}</span>
-                      <span className="text-xs text-surface-300 font-mono">{ad.fiatUnit} / USDT</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs mb-3">
-                      <div className="bg-surface-800 rounded-md px-2 py-1.5">
-                        <p className="text-surface-300 text-[10px] uppercase tracking-wide">Available</p>
-                        <p className="text-surface-50 font-mono">{formatAmount(ad.availableQuantity, 2)} USDT</p>
-                      </div>
-                      <div className="bg-surface-800 rounded-md px-2 py-1.5">
-                        <p className="text-surface-300 text-[10px] uppercase tracking-wide">Limit ({ad.fiatUnit})</p>
-                        <p className="text-surface-50 font-mono">{formatCompact(ad.minSingleTransAmount)}–{formatCompact(ad.maxSingleTransAmount)}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => { setEditAd(ad); setShowAdModal(true); }}
-                      className="w-full flex items-center justify-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 bg-surface-800 hover:bg-surface-700 border border-surface-700 rounded-md py-1.5 transition-colors">
-                      <Pencil size={12} /> Ubah iklan
+                    <button onClick={e => toggleAdStatus(ad, e)} disabled={busy} title={v.open ? 'Pause ad' : 'Activate ad'}
+                      className={`transition-colors disabled:opacity-40 ${v.open ? 'text-buy hover:text-sell' : 'text-surface-300 hover:text-buy'}`}>
+                      {busy && !editing ? <RefreshCw size={18} className="animate-spin" /> : v.open ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
                     </button>
                   </div>
-                );
-              })}
-            </div>
-          )
+                  <div className="flex items-baseline justify-between mb-2">
+                    {editing ? (
+                      <div className="flex items-center gap-1">
+                        <input autoFocus value={priceEdit.value} inputMode="decimal"
+                          onChange={e => setPriceEdit({ advNo: v.no, value: e.target.value })}
+                          onKeyDown={e => { if (e.key === 'Enter') saveQuickPrice(ad); if (e.key === 'Escape') setPriceEdit(null); }}
+                          className="w-28 bg-surface-950 border border-brand-500/50 rounded-md px-2 py-1 text-sm font-mono text-surface-50 text-right focus:outline-none" />
+                        <span className="text-[11px] text-surface-300">{ad.priceType === 2 ? '%' : ad.fiatUnit}</span>
+                        <button onClick={() => saveQuickPrice(ad)} disabled={busy} title="Simpan (Enter)"
+                          className="w-7 h-7 flex items-center justify-center rounded-md bg-buy/15 text-buy hover:bg-buy/25 disabled:opacity-50">
+                          {busy ? <RefreshCw size={12} className="animate-spin" /> : <Check size={13} />}
+                        </button>
+                        <button onClick={() => setPriceEdit(null)} title="Batal (Esc)"
+                          className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:bg-surface-700"><X size={13} /></button>
+                      </div>
+                    ) : isBingx ? (
+                      <button onClick={() => setPriceEdit({ advNo: v.no, value: ad.priceType === 2 ? ad.floatRatio : ad.price })}
+                        title="Ubah harga cepat (satu panggilan modifyPrice)"
+                        className="group flex items-center gap-1.5 text-lg font-mono font-semibold text-surface-50 hover:text-brand-300 transition-colors">
+                        {v.price}<Pencil size={11} className="text-surface-300 group-hover:text-brand-300" />
+                      </button>
+                    ) : (
+                      <span className="text-lg font-mono font-semibold text-surface-50">{v.price}</span>
+                    )}
+                    <span className="text-xs text-surface-300 font-mono">{ad.fiatUnit} / USDT</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                    <div className="bg-surface-800 rounded-md px-2 py-1.5">
+                      <p className="text-surface-300 text-[10px] uppercase tracking-wide">Available</p>
+                      <p className="text-surface-50 font-mono">{v.available} USDT</p>
+                    </div>
+                    <div className="bg-surface-800 rounded-md px-2 py-1.5">
+                      <p className="text-surface-300 text-[10px] uppercase tracking-wide">Limit ({ad.fiatUnit})</p>
+                      <p className="text-surface-50 font-mono">{v.limit}</p>
+                    </div>
+                    {v.pay && (
+                      <div className="col-span-2 bg-surface-800 rounded-md px-2 py-1.5">
+                        <p className="text-surface-300 text-[10px] uppercase tracking-wide">Bayar{v.hidden ? ' · info disembunyikan' : ''}</p>
+                        <p className="text-surface-50 truncate">{v.pay}</p>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => { setEditAd(ad); setShowAdModal(true); }}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs text-surface-200 hover:text-surface-50 bg-surface-800 hover:bg-surface-700 border border-surface-700 rounded-md py-1.5 transition-colors">
+                    <Pencil size={12} /> Ubah iklan
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -681,11 +848,16 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         <OrderDetailModal merchantId={merchant.id} advOrderNo={selectedOrder || openChatOrder}
           initialTab={openChatOrder && !selectedOrder ? 'chat' : 'detail'}
           onClose={() => { setSelectedOrder(null); setOpenChatOrder(null); doFetch(false, true); fetchAds(); }}
-          onActionDone={() => doFetch(false, true)} />
+          onActionDone={() => { doFetch(false, true); fetchBalance(); }} />
       )}
-      {showAdModal && editAd && (
+      {showAdModal && !isBingx && editAd && (
         <AdModal merchantId={merchant.id} existingAd={editAd}
           onClose={() => { setShowAdModal(false); setEditAd(null); }} onSaved={fetchAds} />
+      )}
+      {showAdModal && isBingx && (
+        <BingxAdModal merchant={merchant} existingAd={editAd}
+          onClose={() => { setShowAdModal(false); setEditAd(null); }}
+          onSaved={() => { fetchAds(); fetchBalance(); }} />
       )}
     </div>
   );

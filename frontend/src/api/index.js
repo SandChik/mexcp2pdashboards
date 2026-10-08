@@ -7,15 +7,21 @@ api.interceptors.request.use(config => {
   return config;
 });
 api.interceptors.response.use(res => res, err => {
-  if (err.response?.status === 401) { localStorage.removeItem('token'); window.location.href = '/login'; }
+  // A wrong password on the login form (or a wrong old password in Settings)
+  // is also a 401 — that must show its message, not bounce the page. (v76)
+  const url = String(err.config?.url || '');
+  const isAuthForm = url.startsWith('/auth/login') || url.startsWith('/auth/setup') || url.startsWith('/auth/change-');
+  if (err.response?.status === 401 && !isAuthForm) { localStorage.removeItem('token'); window.location.href = '/login'; }
   return Promise.reject(err);
 });
 
 export const authApi = {
   status: () => api.get('/auth/status'),
-  login: (password) => api.post('/auth/login', { password }),
-  setup: (password) => api.post('/auth/setup', { password }),
-  changePassword: (old, nw) => api.post('/auth/change-password', { oldPassword: old, newPassword: nw })
+  me: () => api.get('/auth/me'),
+  login: (username, password) => api.post('/auth/login', { username, password }),
+  setup: (username, password) => api.post('/auth/setup', { username, password }),
+  changePassword: (old, nw) => api.post('/auth/change-password', { oldPassword: old, newPassword: nw }),
+  changeUsername: (password, newUsername) => api.post('/auth/change-username', { password, newUsername }),
 };
 
 export const merchantApi = {

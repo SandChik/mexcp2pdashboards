@@ -24,6 +24,17 @@ export const PLATFORMS = {
 };
 export const platformOf = (x) => (x?.platform && PLATFORMS[x.platform] ? x.platform : 'mexc');
 
+/** MEXC keeps appeals out of `state`: `complaining` (list) / `complained` (detail). */
+export const isAppeal = (o) => !!(o && (o.complaining === true || o.complained === true || o._state === 9 || o.state === 9));
+export function AppealBadge({ className = '' }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-md px-1.5 py-0.5 bg-sell/15 text-sell ring-1 ring-sell/30 ${className}`}
+      title="Order ini sedang BANDING (dispute). Periksa di app sebelum bertindak.">
+      ⚠ Banding
+    </span>
+  );
+}
+
 export function PlatformBadge({ platform, className = '' }) {
   const p = PLATFORMS[platform] || PLATFORMS.mexc;
   return (
@@ -62,7 +73,9 @@ export const ORDER_STATES = {
   //   blue label   = payment step cleared, it's moving / your turn
   0: { label: 'Belum bayar', color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-brand-400' },
   1: { label: 'Sudah bayar', color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
-  2: { label: 'Menunggu',    color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-brand-400' },
+  // MEXC WAIT_PROCESS: on extra-verification ads this is "buyer submitted
+  // documents, merchant must approve/reject" — only possible in the MEXC app.
+  2: { label: 'Verifikasi',  color: 'text-warning bg-warning/10',     group: 'active',    accent: 'border-l-warning' },
   3: { label: 'Diproses',    color: 'text-brand-300 bg-brand-500/10', group: 'active',    accent: 'border-l-brand-400' },
   4: { label: 'Selesai',     color: 'text-buy bg-buy/10',             group: 'done',      accent: 'border-l-buy' },
   5: { label: 'Dibatalkan',  color: 'text-sell bg-sell/10',           group: 'cancelled', accent: 'border-l-sell' },

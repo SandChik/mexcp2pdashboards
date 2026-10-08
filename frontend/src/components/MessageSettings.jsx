@@ -18,6 +18,7 @@ const STATE_OPTIONS = [
   [0, 'Belum bayar (NOT_PAID)'],
   [1, 'Sudah bayar (PAID)'],
   [2, 'Menunggu proses (WAIT_PROCESS)'],
+  [-2, 'Verifikasi diterima (keluar dari WAIT_PROCESS, tidak ditolak)'],
   [3, 'Diproses (PROCESSING)'],
   [4, 'Selesai (DONE)'],
   [5, 'Dibatalkan (CANCEL)'],
@@ -177,6 +178,11 @@ export default function MessageSettings() {
                 <p className="text-surface-200">cocok terakhir: order …{String(wstat.lastMatch.advOrderNo).slice(-6)} aturan {wstat.lastMatch.rules.join(',')} ({wstat.lastMatch.isNew ? 'order baru' : `status ${wstat.lastMatch.prevState}→${wstat.lastMatch.state}`}) → <b className={wstat.lastMatch.result === 'terkirim' ? 'text-buy' : 'text-warning'}>{wstat.lastMatch.result || '…'}</b> · {ago(wstat.lastMatch.at)}</p>
               )}
               {wstat.lastSentAt && <p className="text-buy">kirim terakhir: {ago(wstat.lastSentAt)}</p>}
+              {Array.isArray(wstat.transitions) && wstat.transitions.length > 0 && (
+                // v76: the actual state hops the worker saw — proof of what a
+                // verification order does after approval (2→0? 2→3?).
+                <p className="text-surface-300">perpindahan status terakhir: {wstat.transitions.slice(0, 6).map(t => `…${String(t.advOrderNo).slice(-4)} ${t.from}→${t.to}`).join(' · ')}</p>
+              )}
               {wstat.lastError && <p className="text-sell">error terakhir: {wstat.lastError}</p>}
               <p className="text-surface-300/80">Aturan hanya menyala saat order BERPINDAH ke status itu setelah siklus pertama; order yang sudah ada saat server restart tidak dibalas.</p>
             </div>

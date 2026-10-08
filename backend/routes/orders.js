@@ -6,7 +6,7 @@ const { mexcGet, mexcPost } = require('../utils/mexcApi');
 
 const { getMerchant } = require('../utils/store');
 const { audit } = require('../utils/audit');
-const { captureFtdByOrderNos } = require('../utils/captureCore');
+const { captureFtdByOrderNos, getDetailCached, cacheComplete } = require('../utils/captureCore');
 // BingX merchants take a different road inside the same routes: the URLs the
 // browser calls stay identical, only the upstream and the translator differ.
 const bx = require('../utils/bingxOrders');
@@ -31,6 +31,28 @@ const TERMINAL = new Set([4, 5, 6, 7, 8]); // done/cancel/invalid/refuse/timeout
 const TERMINAL_BINGX = new Set([4, 5, 6, 7, 8, 9]); // + 9 = appeal: never release while a dispute is open
 
 // Single window fetch — MEXC max 20 pages × 10 = 200 per window
+// ── V2 order list (MEXC docs, June 2026): scroll pagination via
+//    lastCreateTime + lastId, and it carries `complaining` (appeal flag) which
+//    the V1 page-based endpoint may not. Used for the quick window; if MEXC
+//    answers with an error the caller falls back to V1 for ten minutes.
+const V2_PATH = '/api/v3/fiat/market/order/paginationV2';
+let v2DownUntil = 0;
+async function fetchWindowV2(params, apiKey, apiSecret, maxPages = 4) {
+  let all = [];
+  let cursor = {};
+  for (let page = 0; page < maxPages; page++) {
+    const res = await mexcGet(V2_PATH, { ...params, ...cursor, limit: 50 }, apiKey, apiSecret);
+    if (res.code !== 0) { const e = new Error(`MEXC V2 ${res.code}: ${res.msg}`); e.mexc = res; throw e; }
+    const items = Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.data) ? res.data.data : []);
+    if (items.length === 0) break;
+    all = all.concat(items);
+    if (items.length < 50) break;
+    const last = items[items.length - 1];
+    cursor = { lastCreateTime: last.createTime, lastId: last.advOrderNo };
+  }
+  return all;
+}
+
 async function fetchWindow(endpoint, params, apiKey, apiSecret, maxPages = 20) {
   let all = [];
   for (let page = 1; page <= maxPages; page++) {
@@ -114,6 +136,15 @@ async function getOrders(endpoint, params, apiKey, apiSecret, isQuick) {
     // 5s across 3 merchants — more than the global rate gate can serve, so
     // the queue backs up and EVERYTHING gets slow. Older rows are carried
     // over by the client-side merge; active orders are always the newest.
+    // v74: the documented V2 endpoint first (it carries `complaining`, the
+    // appeal flag); V1 only when V2 errors, for ten minutes at a time.
+    if (Date.now() > v2DownUntil) {
+      try { return await fetchWindowV2({ ...params, startTime: now - DAY, endTime: now }, apiKey, apiSecret, 4); }
+      catch (e) {
+        v2DownUntil = Date.now() + 10 * 60000;
+        console.error('[orders] V2 list failed, V1 for 10 min —', e.mexc?.msg || e.response?.data?.msg || e.message);
+      }
+    }
     return fetchWindow(endpoint,
       { ...params, startTime: now - DAY, endTime: now },
       apiKey, apiSecret, 8);
@@ -140,7 +171,7 @@ router.get('/:merchantId/market', authMiddleware, async (req, res) => {
     const params = { ...baseParams, startTime, endTime };
     const data = await getOrdersCached('/api/v3/fiat/market/order/pagination',
       params, merchant, quick === 'true');
-    res.json({ code: 0, data, total: data.length });
+    res.json({ code: 0, data, total: data.length, ...(data.meta ? { meta: data.meta } : {}) });
   } catch (err) {
     console.error('[orders/market]', err.message);
     res.status(500).json({ code: -1, error: err.message });
@@ -277,29 +308,25 @@ router.post('/:merchantId/create', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/orders/:merchantId/member-ids — resolve stable UID (memberId) per
-// order via order detail. Cached so re-runs are cheap. Used by the UU report.
+// POST /api/orders/:merchantId/member-ids — resolve stable UID (memberId),
+// KYC name and (v76) the receiving bank per order via order detail. Cached in
+// uu-cache so every order costs one platform call, ever. Both platforms go
+// through captureCore.getDetailCached, so the buyer log and this route can
+// never disagree about an order.
 router.post('/:merchantId/member-ids', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   const advOrderNos = Array.isArray(req.body.advOrderNos) ? req.body.advOrderNos : [];
   const cache = readUuCache();
-  if (bx.isBingx(merchant)) {
-    const out = await bx.resolveMembers(merchant, advOrderNos, cache);
-    writeUuCache(cache);
-    return res.json(out);
-  }
   const map = {};
   let fetched = 0, fromCache = 0, capped = false;
-  const MAX_FETCH = 600; // bound per-call work; cache makes later calls instant
+  const MAX_FETCH = bx.isBingx(merchant) ? 30 : 600; // bound per-call work; cache makes later calls instant
   for (const no of advOrderNos) {
-    if (cache[no] && cache[no].registryTime !== undefined) { map[no] = cache[no]; fromCache++; continue; }
+    if (cacheComplete(cache[no])) { map[no] = cache[no]; fromCache++; continue; }
     if (fetched >= MAX_FETCH) { capped = true; continue; }
     try {
-      const d = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo: no }, merchant.apiKey, merchant.apiSecret);
-      const u = (d && d.data && d.data.userInfo) || {};
-      const rec = { memberId: u.memberId || u.imId || null, nickName: u.nickName || null, realName: u.realName || null, registryTime: u.registryTime || null };
-      map[no] = rec; cache[no] = rec; fetched++;
+      const r = await getDetailCached(merchant, no, cache);
+      map[no] = r.u; if (r.fetched) fetched++;
     } catch { /* skip unresolved */ }
   }
   writeUuCache(cache);

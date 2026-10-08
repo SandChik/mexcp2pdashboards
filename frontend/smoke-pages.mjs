@@ -17,7 +17,8 @@ const reply = (url) => {
   if (url.includes('/api/orders')) return { code:0, data:[] };
   if (url.includes('/api/ads')) return { code:0, data:[] };
   if (url.includes('/api/registry')) return { records:[], nameIndex:{} };
-  if (url.includes('/api/auth')) return { ok:true };
+  if (url.includes('/api/auth/me')) return { user:'admin' };
+  if (url.includes('/api/auth')) return { ok:true, isSetup:true };
   return {};
 };
 class FakeXHR {
@@ -39,7 +40,7 @@ w.console.error = (...a) => errs.push(a.map(x => (x&&x.stack)?x.stack:String(x))
 w.eval(fs.readFileSync('/tmp/app.iife.js','utf8'));
 await new Promise(r=>setTimeout(r,500));
 
-const routes = ['/', '/bingx', '/queue', '/uu', '/ftd', '/buyers', '/settings'];
+const routes = ['/', '/bingx', '/queue', '/uu', '/ftd', '/buyers', '/settings', '/login'];
 let bad = 0;
 for (const route of routes) {
   w.history.pushState({}, '', route);

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { mexcGet } = require('./mexcApi');
+const { bankName } = require('./bankMap');
 
 /**
  * Capture core — ONE implementation of FTD-stat snapshotting and buyer-log
@@ -37,14 +38,50 @@ function normState(s) {
 }
 const ACTIVE = new Set([0, 1, 2, 3]);
 
-// Fetch order detail with the shared uu-cache (one MEXC hit per order, ever).
+// The receiving account an order was settled through, as a bank/method NAME
+// (v76). SELL = our account the buyer paid into; BUY = the seller's account.
+// MEXC puts a numeric payMethod id (→ bankMap) and sometimes bankName; the
+// BingX adapter already fills payMethod/bankName with the method's name.
+function bankOfDetail(data) {
+  const pay = (data && (data.confirmPaymentInfo || (Array.isArray(data.paymentInfo) ? data.paymentInfo[0] : null))) || null;
+  if (!pay) return null;
+  const name = bankName(pay.payMethod, pay.bankName || null);
+  return name || pay.bankName || null;
+}
+
+// A cache record is complete when it carries every field the dashboard shows.
+// Records written before v76 lack `bank`; they are refetched once (bounded by
+// the callers' per-call caps) and then stay cached for good.
+function cacheComplete(u) { return !!u && u.realName !== undefined && u.registryTime !== undefined && u.bank !== undefined; }
+
+function recordFromDetail(data, platform) {
+  const ui = (data && data.userInfo) || {};
+  const rec = {
+    memberId: ui.memberId || ui.imId || null,
+    nickName: ui.nickName || null,
+    realName: ui.realName || null,
+    registryTime: ui.registryTime || null,
+    bank: bankOfDetail(data),
+  };
+  if (platform === 'bingx') rec.platform = 'bingx';
+  return rec;
+}
+
+// Fetch order detail with the shared uu-cache (one platform hit per order,
+// ever). Platform-aware since v76: BingX details go through the BingX client.
+async function fetchDetail(merchant, advOrderNo) {
+  if (merchant.platform === 'bingx') {
+    const bx = require('./bingxOrders'); // lazy: bingxOrders requires nothing from here, but keep boot order simple
+    return bx.getDetail(merchant, advOrderNo, false);
+  }
+  const d = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo }, merchant.apiKey, merchant.apiSecret);
+  return (d && d.data) || {};
+}
 async function getDetailCached(merchant, advOrderNo, cache) {
   let u = cache[advOrderNo];
-  if (u && u.realName !== undefined && u.registryTime !== undefined) return { u, fetched: false, full: null };
-  const d = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo }, merchant.apiKey, merchant.apiSecret);
-  const data = (d && d.data) || {};
-  const ui = data.userInfo || {};
-  u = { memberId: ui.memberId || ui.imId || null, nickName: ui.nickName || null, realName: ui.realName || null, registryTime: ui.registryTime || null };
+  if (cacheComplete(u)) return { u, fetched: false, full: null };
+  const data = await fetchDetail(merchant, advOrderNo);
+  u = recordFromDetail(data, merchant.platform);
   cache[advOrderNo] = u;
   return { u, fetched: true, full: data };
 }
@@ -107,9 +144,11 @@ function captureBuyerLog(merchant, orders, MAX_FETCH = 30) {
       } catch { continue; }
       log[no] = {
         merchantId: merchant.id,
+        platform: merchant.platform === 'bingx' ? 'bingx' : 'mexc',
         realName: u.realName || null,
         nickName: u.nickName || null,
         memberId: u.memberId || null,
+        bank: u.bank || null,
         doneAt: Number(o.doneAt) || Date.now(),
         amount: Number(o.amount) || 0,
         usdt: Number(o.usdt) || 0,
@@ -183,6 +222,7 @@ function addBuyerLogEntries(entries, source = 'manual') {
         amount: Number(e.amount) || 0,
         usdt: Number(e.usdt) || 0,
         fiatUnit: (e.fiatUnit && String(e.fiatUnit).trim().toUpperCase()) || 'IDR',
+        bank: (e.bank && String(e.bank).trim()) || null,
         note: (e.note && String(e.note).trim()) || null,
         source,                    // 'manual' | 'import'
         batchId,
@@ -230,6 +270,7 @@ async function fetchRecentOrders(merchant, hours = 24, maxPages = 3) {
 
 module.exports = {
   captureFtdByOrderNos, captureBuyerLog, fetchRecentOrders, normState, ACTIVE,
+  getDetailCached, recordFromDetail, cacheComplete, bankOfDetail,
   addBuyerLogEntries, deleteBuyerLogBatch, MANUAL_MERCHANT_ID,
   FTD_PATH, LOG_PATH,
 };

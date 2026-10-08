@@ -22,13 +22,13 @@ import { X, Upload, FileDown, PencilLine, AlertTriangle, CheckCircle2, XCircle, 
 // Canonical template columns. Order matters for the downloaded file only —
 // import matches by header text, so a user may reorder or drop columns.
 export const TEMPLATE_HEADERS = [
-  'Nama KYC', 'Nickname', 'Tanggal Selesai', 'Nominal', 'Mata Uang', 'USDT', 'No. Order', 'Catatan',
+  'Nama KYC', 'Nickname', 'Tanggal Selesai', 'Nominal', 'Mata Uang', 'USDT', 'Metode', 'No. Order', 'Catatan',
 ];
 
 export function downloadTemplate() {
   downloadCsv('template-catatan-buyer.csv', TEMPLATE_HEADERS, [
-    ['Budi Santoso', 'budi_p2p', '2026-08-01 14:30', '1500000', 'IDR', '92.5', '', 'contoh — hapus baris ini'],
-    ['Siti Rahayu', '', '2026-08-02', '500000', 'IDR', '', '', 'kolom selain Nama KYC boleh dikosongkan'],
+    ['Budi Santoso', 'budi_p2p', '2026-08-01 14:30', '1500000', 'IDR', '92.5', 'Bank Mandiri', '', 'contoh — hapus baris ini'],
+    ['Siti Rahayu', '', '2026-08-02', '500000', 'IDR', '', '', '', 'kolom selain Nama KYC boleh dikosongkan'],
   ]);
 }
 
@@ -44,6 +44,7 @@ const FIELD_ALIASES = {
   fiatUnit:   ['matauang', 'currency', 'fiat', 'fiatunit'],
   usdt:       ['usdt', 'qty', 'quantity', 'jumlahusdt', 'kripto'],
   advOrderNo: ['noorder', 'nomororder', 'advorderno', 'order', 'orderno'],
+  bank:       ['metode', 'metodepembayaran', 'bank', 'namabank', 'paymethod', 'payment', 'pembayaran'],
   note:       ['catatan', 'note', 'keterangan', 'ket'],
 };
 
@@ -85,6 +86,7 @@ function rowsToDrafts(headers, rows) {
       fiatUnit: String(get('fiatUnit')).trim().toUpperCase(),
       usdt: parseNum(get('usdt')),
       advOrderNo: String(get('advOrderNo')).trim(),
+      bank: String(get('bank')).trim(),
       note: String(get('note')).trim(),
       force: false,
     };
@@ -97,7 +99,7 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
   const [existing, setExisting] = useState(null); // Set of normalized names already logged
   const [loadingNames, setLoadingNames] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ realName: '', nickName: '', doneAt: '', amount: '', fiatUnit: 'IDR', usdt: '', note: '' });
+  const [form, setForm] = useState({ realName: '', nickName: '', doneAt: '', amount: '', fiatUnit: 'IDR', usdt: '', bank: '', note: '' });
   const [fileName, setFileName] = useState('');
 
   // Duplicate check must span every merchant, not just the one filtered on the
@@ -163,10 +165,11 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
       fiatUnit: form.fiatUnit.trim().toUpperCase(),
       usdt: parseNum(form.usdt),
       advOrderNo: '',
+      bank: form.bank.trim(),
       note: form.note.trim(),
       force: false,
     }]);
-    setForm({ realName: '', nickName: '', doneAt: '', amount: '', fiatUnit: form.fiatUnit, usdt: '', note: '' });
+    setForm({ realName: '', nickName: '', doneAt: '', amount: '', fiatUnit: form.fiatUnit, usdt: '', bank: '', note: '' });
   }
 
   const toggleForce = (row) => setDrafts(ds => ds.map(d => d.row === row ? { ...d, force: !d.force } : d));
@@ -183,6 +186,7 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
         amount: r.amount === null ? DEFAULTS.amount : r.amount,
         usdt: r.usdt === null ? DEFAULTS.usdt : r.usdt,
         fiatUnit: r.fiatUnit || DEFAULTS.fiatUnit,
+        bank: r.bank || null,
         note: r.note || null,
         advOrderNo: r.advOrderNo || undefined,
         force: r.status === 'dup',
@@ -262,6 +266,8 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
                 <input value={form.fiatUnit} onChange={e => setForm({ ...form, fiatUnit: e.target.value })} placeholder="IDR" className={inp} /></div>
               <div><label className={lbl}>USDT</label>
                 <input value={form.usdt} onChange={e => setForm({ ...form, usdt: e.target.value })} placeholder="0" className={inp} /></div>
+              <div><label className={lbl}>Metode pembayaran</label>
+                <input value={form.bank} onChange={e => setForm({ ...form, bank: e.target.value })} placeholder="mis. Bank Mandiri" className={inp} /></div>
               <div className="col-span-2 sm:col-span-2"><label className={lbl}>Catatan</label>
                 <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="opsional — mis. sumber data" className={inp} /></div>
               <div className="flex items-end">
@@ -326,6 +332,7 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
                         <th className="px-3 py-2 font-medium">Nama KYC</th>
                         <th className="px-3 py-2 font-medium">Nickname</th>
                         <th className="px-3 py-2 font-medium text-right">Nominal</th>
+                        <th className="px-3 py-2 font-medium">Metode</th>
                         <th className="px-3 py-2 font-medium">Status</th>
                         <th className="px-3 py-2 font-medium"></th>
                       </tr>
@@ -339,6 +346,7 @@ export default function BuyerLogAdd({ anchorId, onClose, onDone }) {
                           <td className="px-3 py-2 text-right font-mono text-surface-200 text-xs">
                             {(r.amount === null ? 0 : r.amount).toLocaleString('id-ID')} {r.fiatUnit || DEFAULTS.fiatUnit}
                           </td>
+                          <td className="px-3 py-2 text-surface-300 text-xs">{r.bank || '—'}</td>
                           <td className="px-3 py-2 text-xs">
                             {r.status === 'ok' && <span className="text-buy">siap</span>}
                             {r.status === 'error' && <span className="text-sell" title={r.reason}>tidak valid</span>}

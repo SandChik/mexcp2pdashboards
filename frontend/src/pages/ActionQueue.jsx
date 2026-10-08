@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { copyToClipboard } from '../clipboard';
 import Layout from '../components/Layout';
 import OrderDetailModal from '../components/OrderDetailModal';
-import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge, PlatformBadge, platformOf } from '../components/helpers';
+import { formatAmount, formatTime, getBankName, SideBadge, OrderStateBadge, PlatformBadge, platformOf, AppealBadge, isAppeal } from '../components/helpers';
 import { runAction, actionFor } from '../actions';
 import { getQueue, subscribeQueue, refreshQueue, getQueueMeta, getActionableCount, getNameIndex, isBuyerLogOn } from '../actionQueue';
 import { ordersApi } from '../api';
@@ -265,6 +265,7 @@ export default function ActionQueue() {
                         </span>
                         <SideBadge side={o.side} />
                         <OrderStateBadge state={o._state} />
+                        {(isAppeal(o) || isAppeal(d)) && <AppealBadge />}
                         {cd && (
                           <span className={`flex items-center gap-0.5 text-[11px] font-mono tnum rounded-md px-1.5 py-0.5 ${urgent ? 'bg-sell/15 text-sell animate-pulse-ring' : 'bg-warning/10 text-warning'}`}>
                             {urgent ? <AlertTriangle size={10} /> : <Clock size={10} />}{cd}
@@ -312,7 +313,7 @@ export default function ActionQueue() {
                       // then explaining why nothing happened.
                       <div className="flex-shrink-0 flex items-center justify-center gap-1.5 text-xs text-surface-300 rounded-lg px-3 sm:px-4 h-11 min-w-[104px] sm:min-w-[132px] border border-dashed border-surface-700 text-center leading-tight">
                         <Hourglass size={13} className="flex-shrink-0" />
-                        {o._state === 9 ? 'Banding — tangani di BingX' : o._state === 10 ? `Status BingX ${o._bingx?.orderStatus ?? '?'} — buka Raw` : o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
+                        {o._state === 9 ? 'Banding — tangani di BingX' : o._state === 10 ? `Status BingX ${o._bingx?.orderStatus ?? '?'} — buka Raw` : o._state === 2 ? 'Buyer menunggu verifikasi — setujui/tolak di app MEXC' : o.side === 'SELL' ? 'Menunggu pembeli bayar' : 'Menunggu penjual release'}
                       </div>
                     ) : (
                       <button onClick={() => act(o)} disabled={!!busy}

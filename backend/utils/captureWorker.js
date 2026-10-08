@@ -32,23 +32,31 @@ async function cycle() {
   if (running) return; // never overlap cycles
   running = true;
   try {
-    const { fetchRecentOrders } = require('./captureCore');
-    // BingX merchants are skipped here until FTD/buyer-log get their BingX path:
-    // this loop talks to MEXC endpoints and would just log errors for them.
-    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(m => m && m.platform !== 'bingx');
+    const { fetchRecentOrders, normState } = require('./captureCore');
+    // v76: BingX merchants take part in the BUYER LOG (their orders are read
+    // through the BingX client). FTD snapshots stay MEXC-only — BingX exposes
+    // no per-buyer trade statistics.
+    const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(Boolean);
     if (merchants.length === 0) return;
     const settings = readSettings();
 
     for (const merchant of merchants) {
+      const isBingx = merchant.platform === 'bingx';
+      if (isBingx && !settings[merchant.id]?.buyerLog) continue; // nothing else to do for BingX
       let orders;
-      try { orders = await fetchRecentOrders(merchant, 24, 3); }
-      catch (e) {
-        console.error(`[worker] ${merchant.name}: order fetch failed —`, e.response?.data?.msg || e.message);
+      try {
+        if (isBingx) {
+          const bx = require('./bingxOrders');
+          const cutoff = Date.now() - 24 * 3600000;
+          orders = (await bx.fetchQuick(merchant)).map(o => ({ ...o, _state: normState(o.state) })).filter(o => (o.createTime || 0) >= cutoff);
+        } else orders = await fetchRecentOrders(merchant, 24, 3);
+      } catch (e) {
+        console.error(`[worker] ${merchant.name}: order fetch failed —`, e.response?.data?.msg || e.bingx?.msg || e.message);
         continue; // one merchant failing must not stall the others
       }
 
       // FTD: snapshot in-progress SELL orders before MEXC hides their stats
-      const activeSell = orders.filter(o => o.side === 'SELL' && ACTIVE.has(o._state)).map(o => o.advOrderNo);
+      const activeSell = isBingx ? [] : orders.filter(o => o.side === 'SELL' && ACTIVE.has(o._state)).map(o => o.advOrderNo);
       if (activeSell.length) {
         try {
           const r = await captureFtdByOrderNos(merchant, activeSell);

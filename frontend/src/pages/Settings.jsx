@@ -5,7 +5,8 @@ import MessageSettings from '../components/MessageSettings';
 import SoundSettings from '../components/SoundSettings';
 import NotifySettings from '../components/NotifySettings';
 import VersionInfo from '../components/VersionInfo';
-import { Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Key, Activity, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Key, Activity, CheckCircle2, XCircle, User } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { PlatformBadge, PLATFORMS } from '../components/helpers';
 import { invalidateQueueMerchants, refreshQueue } from '../actionQueue';
 
@@ -132,58 +133,91 @@ function MerchantForm({ existing, onSave, onCancel }) {
   );
 }
 
-function ChangePasswordSection() {
+function AccountSection() {
+  // v76: one account — username + password. Both live in config.json
+  // (appUser / appPassword); older installs show up as "admin".
+  const [me, setMe] = useState('');
+  const [uform, setUform] = useState({ newUsername: '', password: '' });
   const [form, setForm] = useState({ oldPassword: '', newPassword: '', confirm: '' });
   const [loading, setLoading] = useState(false);
+  const [uloading, setUloading] = useState(false);
+  const { login } = useAuth();
+
+  useEffect(() => { authApi.me().then(r => setMe(r.data?.user || '')).catch(() => {}); }, []);
+
+  async function changeUsername(e) {
+    e.preventDefault();
+    setUloading(true);
+    try {
+      const r = await authApi.changeUsername(uform.password, uform.newUsername.trim());
+      if (r.data?.token) login(r.data.token); // keep this session signed in under the new name
+      setMe(r.data?.user || uform.newUsername);
+      setUform({ newUsername: '', password: '' });
+      toast.success('Username diganti');
+    } catch (err) { toast.error(err.response?.data?.error || 'Gagal mengganti username'); }
+    finally { setUloading(false); }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (form.newPassword !== form.confirm) {
-      toast.error('Passwords do not match');
-      return;
-    }
+    if (form.newPassword !== form.confirm) { toast.error('Password baru tidak sama'); return; }
     setLoading(true);
     try {
       await authApi.changePassword(form.oldPassword, form.newPassword);
-      toast.success('Password changed');
+      toast.success('Password diganti');
       setForm({ oldPassword: '', newPassword: '', confirm: '' });
-    } catch {
-      toast.error('Failed to change password');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { toast.error(err.response?.data?.error || 'Gagal mengganti password'); }
+    finally { setLoading(false); }
   }
 
+  const input = "w-full bg-surface-900 border border-surface-200/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-brand-500 transition-colors font-mono";
+  const label = "block text-xs font-mono text-surface-200/40 uppercase tracking-wider mb-1";
+
   return (
-    <form onSubmit={handleSubmit} className="bg-surface-800 border border-surface-200/10 rounded-xl p-5 space-y-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Key size={16} className="text-surface-200/40" />
-        <h3 className="font-display font-semibold text-white text-sm">Change Password</h3>
-      </div>
-      {[
-        { key: 'oldPassword', label: 'Current Password' },
-        { key: 'newPassword', label: 'New Password' },
-        { key: 'confirm', label: 'Confirm New Password' }
-      ].map(({ key, label }) => (
-        <div key={key}>
-          <label className="block text-xs font-mono text-surface-200/40 uppercase tracking-wider mb-1">{label}</label>
-          <input
-            type="password"
-            value={form[key]}
-            onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-            required
-            className="w-full bg-surface-900 border border-surface-200/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-brand-500 transition-colors font-mono"
-          />
+    <div className="space-y-4">
+      <form onSubmit={changeUsername} className="bg-surface-800 border border-surface-200/10 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <User size={16} className="text-surface-200/40" />
+          <h3 className="font-display font-semibold text-white text-sm">Akun</h3>
+          {me && <span className="ml-auto text-xs font-mono text-surface-300">login sebagai <b className="text-surface-50">{me}</b></span>}
         </div>
-      ))}
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-black rounded-lg py-2.5 text-sm font-display font-semibold transition-colors"
-      >
-        {loading ? 'Changing...' : 'Change Password'}
-      </button>
-    </form>
+        <div>
+          <label className={label}>Username baru</label>
+          <input type="text" value={uform.newUsername} onChange={e => setUform(f => ({ ...f, newUsername: e.target.value }))} required
+            autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="3–32 karakter: huruf kecil, angka, . _ -" className={input} />
+        </div>
+        <div>
+          <label className={label}>Password saat ini</label>
+          <input type="password" value={uform.password} onChange={e => setUform(f => ({ ...f, password: e.target.value }))} required autoComplete="current-password" className={input} />
+        </div>
+        <button type="submit" disabled={uloading}
+          className="w-full bg-surface-700 hover:bg-surface-600 disabled:opacity-50 text-white rounded-lg py-2.5 text-sm font-display font-semibold transition-colors">
+          {uloading ? 'Menyimpan...' : 'Ganti username'}
+        </button>
+      </form>
+
+      <form onSubmit={handleSubmit} className="bg-surface-800 border border-surface-200/10 rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Key size={16} className="text-surface-200/40" />
+          <h3 className="font-display font-semibold text-white text-sm">Change Password</h3>
+        </div>
+        {[
+          { key: 'oldPassword', label: 'Current Password', ac: 'current-password' },
+          { key: 'newPassword', label: 'New Password', ac: 'new-password' },
+          { key: 'confirm', label: 'Confirm New Password', ac: 'new-password' }
+        ].map(({ key, label: l, ac }) => (
+          <div key={key}>
+            <label className={label}>{l}</label>
+            <input type="password" value={form[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} required autoComplete={ac} className={input} />
+          </div>
+        ))}
+        <p className="text-[11px] text-surface-300 font-mono">Minimal 8 karakter. Login salah 5× dari satu alamat = terkunci 15 menit.</p>
+        <button type="submit" disabled={loading}
+          className="w-full bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-black rounded-lg py-2.5 text-sm font-display font-semibold transition-colors">
+          {loading ? 'Changing...' : 'Change Password'}
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -350,7 +384,7 @@ export default function Settings() {
           </section>
 
           {/* Change Password */}
-          <ChangePasswordSection />
+          <AccountSection />
 
           {/* Info */}
           <NotifySettings />
