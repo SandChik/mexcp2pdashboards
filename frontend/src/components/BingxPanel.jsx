@@ -104,8 +104,16 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
     return () => { cancelled = true; };
   }, [orders, merchant.id]);
 
+  const pendingFullRef = useRef(false); // a full fetch asked for while a poll was in flight
+  const [rangeMeta, setRangeMeta] = useState(null);
   const doFetch = useCallback(async (quiet = false, quick = false) => {
-    if (busyRef.current) return;
+    if (busyRef.current) {
+      // A quick poll is in flight. Dropping a FULL fetch here (what v60–v74 did)
+      // meant a date-range change could silently never load — the panel kept
+      // showing only the newest orders. Queue it instead.
+      if (!quick) pendingFullRef.current = true;
+      return;
+    }
     busyRef.current = true;
     if (!quiet) setRefreshing(true);
     try {
@@ -118,6 +126,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
         : await ordersApi.market(merchant.id, params);
       const raw = r.data;
       const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+      if (!quick) setRangeMeta(raw?.meta || null);
       let normalized = list.map(o => ({ ...o, _state: normalizeState(o.state), platform: 'bingx' }));
       if (quick) {
         // Quick = every running order + the newest finished ones. Rows outside
@@ -148,6 +157,7 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
       if (!quiet) toast.error(`Gagal memuat order BingX — ${merchant.name}. ${e.response?.data?.error || 'Cek koneksi atau API key.'}`);
     } finally {
       setLoading(false); setRefreshing(false); busyRef.current = false;
+      if (pendingFullRef.current) { pendingFullRef.current = false; doFetch(false, false); }
     }
   }, [merchant.id, merchant.name]);
 
@@ -161,7 +171,8 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
 
   useEffect(() => {
     initialized.current = false; prevStates.current = {}; prevUnread.current = {};
-    setOrders([]); setLoading(true);
+    ordersRef.current = []; // rows from the previous range must not be carried into the new one
+    setOrders([]); setLoading(true); setRangeMeta(null);
     doFetch(false); fetchAds();
   }, [merchant.id, dateRange]); // eslint-disable-line
 
@@ -365,6 +376,19 @@ export default function BingxPanel({ merchant, dateRange, refreshKey, autoRefres
               </button>
             ))}
           </div>
+        )}
+        {tab === 'orders' && rangeMeta && (
+          // What BingX actually handed over for this range — the honest answer
+          // to "why is last week missing": either BingX only has N orders in
+          // total, or the walk hit its page budget.
+          <p className={`text-[10px] font-mono mt-1.5 ${rangeMeta.truncated ? 'text-warning' : 'text-surface-300/80'}`}
+            title={`stop=${rangeMeta.stop} · halaman ${rangeMeta.pages} × ${rangeMeta.pageSize}`}>
+            BingX: {rangeMeta.fetched}{rangeMeta.total ? ` dari ${rangeMeta.total}` : ''} order dibaca
+            {rangeMeta.oldest ? ` · tertua ${formatTime(rangeMeta.oldest)}` : ''}
+            {rangeMeta.truncated ? ' · batas halaman tercapai, riwayat lebih lama tidak dimuat' : ''}
+            {!rangeMeta.truncated && rangeMeta.total && rangeMeta.fetched >= rangeMeta.total && rangeMeta.oldest && rangeMeta.oldest > rangeMeta.start
+              ? ' · BingX tidak punya order lebih lama dari ini' : ''}
+          </p>
         )}
       </div>
 
