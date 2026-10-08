@@ -288,6 +288,13 @@ diterima (keluar dari WAIT_PROCESS)" dari v76 karena itu tidak pernah kena.
 - Versi tampilan (`frontend/src/version.js`) ikut dinaikkan — v76 pertama
   lupa, sehingga panel Versi menampilkan v75/v76.
 
+v78 — "Verifikasi ditolak" tidak terkirim di uji pertama: penolakan membuat
+order CANCEL dalam hitungan detik, sedangkan worker hanya membaca chat order
+yang masih berjalan, jadi `FAIL_TIP` tidak pernah terbaca. Sekarang chat order
+SELL yang baru berakhir (<2 jam) dan order yang sudah kirim dokumen tapi belum
+ada keputusan ikut dibaca (maks 15 chat per merchant per siklus, yang berjalan
+didahulukan).
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

@@ -32,7 +32,7 @@ const STATE_PATH = path.join(__dirname, '../data/order-states.json');
 // v77: which verification chat events (file/pass/fail) each order has already
 // produced — survives restarts so an old PASS can't re-fire after a deploy.
 const VERIFY_PATH = path.join(__dirname, '../data/verify-seen.json');
-const VERIFY_SCAN_MAX = 10;   // chat histories read per merchant per cycle
+const VERIFY_SCAN_MAX = 15;   // chat histories read per merchant per cycle
 const { readSettings: readMerchantSettings, effectiveSettings } = require('./merchantSettings');
 const INTERVAL_MS = Math.max(10000, Number(process.env.AUTO_REPLY_INTERVAL_MS) || 15000);
 const GAP_MS = 900;           // spacing between two messages to the same buyer
@@ -152,7 +152,20 @@ async function conversationIdOf(merchant, advOrderNo) {
  */
 async function scanVerifyEvents(merchant, orders, seen, dg) {
   const out = [];
-  const candidates = orders.filter(o => o.side === 'SELL' && [0, 1, 2].includes(o._state)).slice(0, VERIFY_SCAN_MAX);
+  // A rejection CANCELs the order within seconds — by the next cycle it is no
+  // longer "running", so the FAIL notice would never be read if only running
+  // orders were scanned (that is exactly how the first live test failed).
+  // Scan: running SELL orders; SELL orders that ended in the last 2 hours; and
+  // any order whose document notice was seen but no decision yet.
+  const recent = Date.now() - 2 * 3600000;
+  const pendingDecision = (no) => seen[no] && seen[no].file && !seen[no].pass && !seen[no].fail;
+  const candidates = orders
+    .filter(o => o.side === 'SELL' && (
+      [0, 1, 2].includes(o._state) ||
+      ([4, 5, 6, 7, 8].includes(o._state) && (o.createTime || 0) > recent) ||
+      pendingDecision(o.advOrderNo)))
+    .sort((a, b) => Number([0, 1, 2].includes(b._state)) - Number([0, 1, 2].includes(a._state))) // running first
+    .slice(0, VERIFY_SCAN_MAX);
   for (const o of candidates) {
     let msgs;
     try {
