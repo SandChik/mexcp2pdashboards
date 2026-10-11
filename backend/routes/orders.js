@@ -10,7 +10,9 @@ const { captureFtdByOrderNos, getDetailCached, cacheComplete } = require('../uti
 // BingX merchants take a different road inside the same routes: the URLs the
 // browser calls stay identical, only the upstream and the translator differ.
 const bx = require('../utils/bingxOrders');
+const gt = require('../utils/gateOrders');
 const router = express.Router();
+const upstreamErr = e => e.gate || e.bingx || e.response?.data || null;
 
 const UU_CACHE = path.join(__dirname, '../data/uu-cache.json');
 function readUuCache() { try { return JSON.parse(fs.readFileSync(UU_CACHE, 'utf8')); } catch { return {}; } }
@@ -108,14 +110,18 @@ function bustQuick(merchantId) { for (const k of quickCache.keys()) if (k.starts
 const QUICK_TTL_MS = 3000;
 
 function getOrdersCached(endpoint, params, merchant, isQuick) {
-  // BingX: same cache, same contract, different fetcher (already house-shaped).
+  // BingX / Gate: same cache, same contract, different fetcher (already house-shaped).
   const fetchQuick = bx.isBingx(merchant)
     ? () => bx.fetchQuick(merchant)
-    : () => getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, true);
+    : gt.isGate(merchant)
+      ? () => gt.fetchQuick(merchant)
+      : () => getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, true);
   if (!isQuick) {
     return bx.isBingx(merchant)
       ? bx.fetchRange(merchant, params.startTime, params.endTime)
-      : getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, false);
+      : gt.isGate(merchant)
+        ? gt.fetchRange(merchant, params.startTime, params.endTime)
+        : getOrders(endpoint, params, merchant.apiKey, merchant.apiSecret, false);
   }
   const key = `${merchant.id}|${endpoint}`;
   const hit = quickCache.get(key);
@@ -197,6 +203,10 @@ router.get('/:merchantId/detail/:advOrderNo', authMiddleware, async (req, res) =
     try { return res.json({ code: 0, data: await bx.getDetail(merchant, req.params.advOrderNo) }); }
     catch (err) { return res.status(500).json({ code: err.bingx?.code ?? -1, error: err.message, msg: err.message }); }
   }
+  if (gt.isGate(merchant)) {
+    try { return res.json({ code: 0, data: await gt.getDetail(merchant, req.params.advOrderNo) }); }
+    catch (err) { return res.status(500).json({ code: err.gate?.code ?? -1, error: err.message, msg: err.message }); }
+  }
   try {
     const r = await mexcGet('/api/v3/fiat/order/detail',
       { advOrderNo: req.params.advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
@@ -216,6 +226,22 @@ router.post('/:merchantId/confirm-paid', authMiddleware, async (req, res) => {
       return res.json(r);
     } catch (err) {
       const d = err.response?.data || err.bingx;
+      return res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message });
+    }
+  }
+  if (gt.isGate(merchant)) {
+    // Gate: confirm-payment on a BUY order. The optional payment_method is a
+    // pay TYPE ("bank"), taken from the order itself — the browser's numeric
+    // userConfirmPaymentId means nothing here and is ignored.
+    try {
+      let payType = null;
+      try { const d = await gt.getDetail(merchant, req.body.advOrderNo); if (d._ourSide !== 'BUY') return res.status(409).json({ code: -1, msg: 'Bukan order BELI — tidak ada pembayaran untuk dikonfirmasi.' }); payType = d._gate?.selPaytype || d.confirmPaymentInfo?.payType || null; } catch { /* detail failed — let Gate decide */ }
+      const r = await gt.confirmPayment(merchant, req.body.advOrderNo, payType);
+      if (r?.code === 0) bustQuick(merchant.id);
+      audit({ action: 'confirm_paid', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advOrderNo: req.body.advOrderNo, payType, code: r?.code, msg: r?.msg });
+      return res.json(r);
+    } catch (err) {
+      const d = upstreamErr(err);
       return res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message });
     }
   }
@@ -267,6 +293,35 @@ router.post('/:merchantId/release-coin', authMiddleware, async (req, res) => {
       return res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message });
     }
   }
+  if (gt.isGate(merchant)) {
+    // Gate release = confirm-receipt on a SELL order ("fiat received"). Same
+    // guard as the other platforms: re-read the order, refuse anything
+    // terminal, in appeal (LOCKED / in_appeal), or on the BUY side.
+    try {
+      let blocked = null;
+      try {
+        const detail = await gt.getDetail(merchant, advOrderNo);
+        if (TERMINAL_BINGX.has(detail.state)) {
+          const names = { 4: 'already completed', 5: 'cancelled', 8: 'timed out', 9: 'in appeal / locked (banding)' };
+          blocked = names[detail.state] || ('in state ' + detail.state);
+        } else if (detail._ourSide !== 'SELL') {
+          blocked = 'a BUY order — nothing to release';
+        }
+      } catch { /* detail failed — don't block on that */ }
+      if (blocked) {
+        audit({ action: 'release_coin_blocked', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, reason: blocked });
+        return res.status(409).json({ code: -1, msg: `Can't release: order is ${blocked}.` });
+      }
+      const r = await gt.confirmReceipt(merchant, advOrderNo);
+      if (r?.code === 0) bustQuick(merchant.id);
+      audit({ action: 'release_coin', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, code: r?.code, msg: r?.msg });
+      return res.json(r);
+    } catch (err) {
+      const d = upstreamErr(err);
+      audit({ action: 'release_coin_error', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advOrderNo, msg: d?.msg || err.message });
+      return res.status(500).json({ code: d?.code || -1, msg: d?.msg || err.message });
+    }
+  }
   try {
     // Safety guard: releasing crypto is irreversible. Block only states that are
     // clearly terminal (already done / cancelled / etc). Anything else — including
@@ -302,6 +357,7 @@ router.post('/:merchantId/create', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   if (bx.isBingx(merchant)) return res.status(501).json({ code: -1, msg: 'Buat order BingX belum didukung' });
+  if (gt.isGate(merchant)) return res.status(501).json({ code: -1, msg: 'Buat order Gate belum didukung (API merchant Gate tidak punya endpoint taker)' });
   try {
     const r = await mexcPost('/api/v3/fiat/merchant/order/deal', req.body, merchant.apiKey, merchant.apiSecret, { priority: true });
     res.json(r);
@@ -320,7 +376,7 @@ router.post('/:merchantId/member-ids', authMiddleware, async (req, res) => {
   const cache = readUuCache();
   const map = {};
   let fetched = 0, fromCache = 0, capped = false;
-  const MAX_FETCH = bx.isBingx(merchant) ? 30 : 600; // bound per-call work; cache makes later calls instant
+  const MAX_FETCH = bx.isBingx(merchant) || gt.isGate(merchant) ? 30 : 600; // bound per-call work; cache makes later calls instant
   for (const no of advOrderNos) {
     if (cacheComplete(cache[no])) { map[no] = cache[no]; fromCache++; continue; }
     if (fetched >= MAX_FETCH) { capped = true; continue; }
@@ -341,6 +397,7 @@ router.post('/:merchantId/capture-stats', authMiddleware, async (req, res) => {
   if (!merchant) return res.status(404).json({ error: 'Not found' });
   const nos = Array.isArray(req.body.advOrderNos) ? req.body.advOrderNos : [];
   if (bx.isBingx(merchant)) return res.json({ captured: 0, skipped: 'bingx' }); // FTD for BingX: later slice
+  if (gt.isGate(merchant)) return res.json({ captured: 0, skipped: 'gate' });   // Gate exposes no per-buyer trade statistics on the order
   const { captured } = await captureFtdByOrderNos(merchant, nos);
   res.json({ captured });
 });

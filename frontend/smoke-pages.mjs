@@ -12,7 +12,9 @@ const reply = (url) => {
   if (url.includes('/api/merchants') && url.endsWith('/settings')) return { buyerLog:true, autoReplyEnabled:true, quickReplies:[], autoReplyRules:[] };
   if (url.includes('/api/merchants/') && url.includes('/pause')) return { ads: [] };
   if (url.includes('/api/notify')) return { webPush: true, publicKey: 'x', subscriptions: [], events: { newOrder: { label: 'Order baru' } }, settings: { events: { newOrder: true }, telegram: { enabled: false, botToken: '', chatId: '' } }, recent: [], watcher: { on: true, intervalMs: 10000, cycles: 1, emitted: 0 } };
-    if (url.includes('/api/merchants')) return [{ id:'m1', name:'Test Merchant', platform:'mexc' }, { id:'b1', name:'Test BingX', platform:'bingx' }];
+  if (url.includes('/api/merchants/') && url.endsWith('/account')) return { platform: 'gate', open: true, workStatus: 1 };
+  if (url.includes('/api/merchants/') && url.endsWith('/balance')) return { free: '100', locked: '0', source: 'spot' };
+    if (url.includes('/api/merchants')) return [{ id:'m1', name:'Test Merchant', platform:'mexc' }, { id:'b1', name:'Test BingX', platform:'bingx' }, { id:'g1', name:'Test Gate', platform:'gate', fiat:'IDR', asset:'USDT' }];
   if (url.includes('/api/orders') && url.includes('member-ids')) return { map:{} };
   if (url.includes('/api/orders')) return { code:0, data:[] };
   if (url.includes('/api/ads')) return { code:0, data:[] };
@@ -40,7 +42,7 @@ w.console.error = (...a) => errs.push(a.map(x => (x&&x.stack)?x.stack:String(x))
 w.eval(fs.readFileSync('/tmp/app.iife.js','utf8'));
 await new Promise(r=>setTimeout(r,500));
 
-const routes = ['/', '/bingx', '/queue', '/uu', '/ftd', '/buyers', '/settings', '/login'];
+const routes = ['/', '/bingx', '/gate', '/queue', '/uu', '/ftd', '/buyers', '/settings', '/login'];
 let bad = 0;
 for (const route of routes) {
   w.history.pushState({}, '', route);

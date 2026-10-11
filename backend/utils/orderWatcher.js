@@ -55,7 +55,7 @@ async function cycle() {
     for (const m of merchants) {
       let list;
       try { list = await quickOrders(m); }
-      catch (e) { diag.lastError = `${m.name}: ${e.response?.data?.msg || e.bingx?.msg || e.message}`; continue; }
+      catch (e) { diag.lastError = `${m.name}: ${e.response?.data?.msg || e.bingx?.msg || e.gate?.msg || e.message}`; continue; }
       const orders = (Array.isArray(list) ? list : []).map(o => ({ ...o, _state: normState(o.state) }));
       const before = prev[m.id] || {};
       const after = {};

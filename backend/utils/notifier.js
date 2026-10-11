@@ -180,6 +180,8 @@ async function enrich(merchant, o) {
     let d;
     if (merchant.platform === 'bingx') {
       d = await require('./bingxOrders').getDetail(merchant, o.advOrderNo, true);
+    } else if (merchant.platform === 'gate') {
+      d = await require('./gateOrders').getDetail(merchant, o.advOrderNo, true);
     } else {
       const { mexcGet } = require('./mexcApi');
       const r = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo: o.advOrderNo }, merchant.apiKey, merchant.apiSecret, { priority: true });
@@ -201,7 +203,7 @@ async function enrich(merchant, o) {
 /** Build title/body/HTML for an event. `o` is a house-shaped list row. */
 function compose(ev, info = {}) {
   const { type, merchant, o } = ev;
-  const plat = (merchant.platform || 'mexc') === 'bingx' ? 'BingX' : 'MEXC';
+  const plat = ({ bingx: 'BingX', gate: 'Gate' })[merchant.platform] || 'MEXC';
   const name = info.realName || null;
   const nick = o.userInfo?.nickName || '';
   const side = o.side === 'BUY' ? 'BELI' : 'JUAL';
@@ -212,7 +214,8 @@ function compose(ev, info = {}) {
     paid:      ['💸', 'Buyer sudah bayar — siap release'],
     message:   ['💬', `Pesan chat masuk (${o.unreadCount || 1} belum dibaca)`],
     cancelled: ['❌', 'Order dibatalkan'],
-    appeal:    ['⚠️', o._bingx?.orderStatus !== undefined && o.state === 10 ? `Status BingX tak dikenal (${o._bingx.orderStatus})` : 'Banding'],
+    appeal:    ['⚠️', o._bingx?.orderStatus !== undefined && o.state === 10 ? `Status BingX tak dikenal (${o._bingx.orderStatus})`
+                      : o._gate?.status !== undefined && o.state === 10 ? `Status Gate tak dikenal (${o._gate.status})` : 'Banding'],
     verify:    ['🪪', 'Buyer mengirim dokumen verifikasi — setujui/tolak di app MEXC'],
     verified:  ['🟢', 'Verifikasi diterima — buyer sekarang boleh bayar'],
     verifyFailed: ['⛔', 'Verifikasi ditolak — order akan dibatalkan'],

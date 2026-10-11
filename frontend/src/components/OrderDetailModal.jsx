@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { copyToClipboard } from '../clipboard';
 import { X, Send, CheckCircle, Coins, RefreshCw, Wifi, WifiOff, AlertCircle, Copy, Image, Paperclip } from 'lucide-react';
 import { ordersApi, chatApi, merchantApi } from '../api';
-import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, KYC_LABELS, getBankName, PlatformBadge, AppealBadge, isAppeal } from './helpers';
+import { OrderStateBadge, SideBadge, formatTime, formatAmount, normalizeState, KYC_LABELS, getBankName, PlatformBadge, AppealBadge, isAppeal, PLATFORMS } from './helpers';
 import toast from 'react-hot-toast';
 import { askConfirm } from './confirm';
 
@@ -135,9 +135,12 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
   }, [merchantId, advOrderNo, conversationId, pollMessages]);
 
   const isBingx = order?.platform === 'bingx';
-  // BingX chat has no WebSocket: the backend answers the same chat endpoints
-  // from BingX's REST IM API, and this modal's 3s history poll is the "live"
-  // channel. Nothing else here needs to know which platform it is on.
+  const isGate = order?.platform === 'gate';
+  const isExt = isBingx || isGate;                      // house-shaped by a backend adapter
+  const platLabel = PLATFORMS[order?.platform]?.label || 'MEXC';
+  // BingX / Gate chat has no WebSocket: the backend answers the same chat
+  // endpoints from their REST IM API, and this modal's 3s history poll is the
+  // "live" channel. Nothing else here needs to know which platform it is on.
   useEffect(() => {
     if (tab === 'chat') { initChat(); }
     else { clearInterval(pollRef.current); }
@@ -155,6 +158,8 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
         toast.error(r.data?.error || 'Send failed');
         setMsgInput(content);
       } else {
+        // Gate: risk control can flag a text yet still answer "sent" — say so.
+        if (r.data?.warning) toast(r.data.warning, { icon: '⚠️', duration: 6000 });
         // Trigger immediate poll to show sent message
         setTimeout(() => pollMessages(conversationId), 500);
       }
@@ -170,7 +175,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
     try {
       const r = await chatApi.send(merchantId, conversationId, text);
       if (!r.data?.success) toast.error(r.data?.error || 'Send failed');
-      else setTimeout(() => pollMessages(conversationId), 500);
+      else { if (r.data?.warning) toast(r.data.warning, { icon: '⚠️', duration: 6000 }); setTimeout(() => pollMessages(conversationId), 500); }
     } catch (e) { toast.error('Send failed: ' + e.message); }
     finally { setSending(false); }
   }
@@ -288,7 +293,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
             <button onClick={() => copyText(advOrderNo, 'No. order')} className="font-mono text-xs text-surface-200/40 hover:text-surface-200 truncate hidden sm:block transition-colors" title="Copy order no">
               {advOrderNo}
             </button>
-            {isBingx && <PlatformBadge platform="bingx" />}
+            {isExt && <PlatformBadge platform={order.platform} />}
             {order && <OrderStateBadge state={stateNum} />}
             {order && isAppeal(order) && <AppealBadge />}
             {order && <SideBadge side={displaySide} />}
@@ -329,9 +334,9 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
               </div>
               {showRaw && (
                 <div className="space-y-2">
-                  {isBingx && order._raw && (
+                  {isExt && order._raw && (
                     <>
-                      <p className="text-[11px] text-surface-300">Persis seperti yang dikirim BingX:</p>
+                      <p className="text-[11px] text-surface-300">Persis seperti yang dikirim {platLabel}:</p>
                       <pre className="bg-surface-950 border border-warning/30 rounded-lg p-3 text-[11px] text-surface-200 font-mono overflow-auto max-h-72 whitespace-pre-wrap break-all">
                         {JSON.stringify(order._raw, null, 2)}
                       </pre>
@@ -339,7 +344,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                     </>
                   )}
                   <pre className="bg-surface-950 border border-surface-700 rounded-lg p-3 text-[11px] text-surface-200 font-mono overflow-auto max-h-72 whitespace-pre-wrap break-all">
-                    {JSON.stringify(isBingx ? { ...order, _raw: undefined } : order, null, 2)}
+                    {JSON.stringify(isExt ? { ...order, _raw: undefined } : order, null, 2)}
                   </pre>
                 </div>
               )}
@@ -406,6 +411,23 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                   <p className="text-sm text-warning font-mono">Iklan ini menyembunyikan info bayar: buyer belum menerima rekening Anda. Kirim lewat aplikasi BingX (aksi ini menyusul di dashboard).</p>
                 </div>
               )}
+              {isGate && order._gate?.inAppeal && (
+                <div className="bg-sell/10 border border-sell/30 rounded-lg px-4 py-3 flex items-center gap-3">
+                  <AlertCircle size={16} className="text-sell flex-shrink-0" />
+                  <p className="text-sm text-sell font-mono">Order ini dalam BANDING di Gate{order._gate.appealText ? `: ${order._gate.appealText}` : ''}. Tangani di situs/aplikasi Gate — release dikunci di sini.</p>
+                </div>
+              )}
+              {isGate && stateNum === 5 && (order._gate?.reasonDesc || order._gate?.reasonId) && (
+                <div className="bg-surface-900 border border-surface-700 rounded-lg px-4 py-3">
+                  <p className="text-xs text-surface-300 font-mono">Alasan pembatalan (Gate): {order._gate.reasonDesc || `kode ${order._gate.reasonId}`}</p>
+                </div>
+              )}
+              {isGate && order.tradeTerms && (
+                <div className="bg-surface-900 border border-surface-700 rounded-lg px-4 py-3">
+                  <p className="text-[11px] text-surface-200/30 font-mono uppercase tracking-widest mb-1">Ketentuan iklan</p>
+                  <p className="text-xs text-surface-200 whitespace-pre-wrap">{order.tradeTerms}</p>
+                </div>
+              )}
 
               {/* Merchant payment info */}
               {order.paymentInfo?.length > 0 && (
@@ -442,9 +464,9 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                     <Row label="Nick" value={order.userInfo.nickName} />
                     {order.userInfo.realName && <Row label="Nama" value={order.userInfo.realName} />}
                     <Row label="KYC" value={
-                      isBingx
-                        // BingX never sends a level; a real name in the payload means
-                        // the account passed KYC (P2P on BingX requires it).
+                      isExt
+                        // BingX / Gate never send a level; a real name in the payload
+                        // means the account passed KYC (P2P on both requires it).
                         ? (order.userInfo.realName ? 'Terverifikasi' : '—')
                         : order.userInfo.kycLevel !== undefined && order.userInfo.kycLevel !== null
                           ? (KYC_LABELS[order.userInfo.kycLevel] || `Level ${order.userInfo.kycLevel}`)
@@ -480,7 +502,9 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
               {messages.map((m, i) => {
                 // MEXC system notices arrive as JSON text — show them as a
                 // centered system line instead of a green JSON bubble (v77).
-                const sys = systemNotice(m);
+                // Gate's status / system rows already come flagged by the backend
+                // (msg_type 5 status updates, uid "System") — same centered line.
+                const sys = systemNotice(m) || (m.system ? { key: m.status || 'system', text: `ℹ️ ${m.content}`, tone: 'bg-surface-800 text-surface-200 ring-surface-600' } : null);
                 if (sys) return (
                   <div key={m.id || i} className="flex justify-center">
                     <div className={`max-w-[90%] text-center text-[11px] rounded-full px-3 py-1 ring-1 ${sys.tone}`} title={sys.key}>
@@ -498,6 +522,7 @@ export default function OrderDetailModal({ merchantId, advOrderNo, initialTab = 
                         alt="img" onError={e=>e.target.style.display='none'} onClick={() => setLightboxUrl(m.imageUrl || m.imageThumbUrl)} />
                     )}
                     {m.type===4 && <a href={m.fileUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline text-xs">📎 Download file</a>}
+                    {m.warning && <p className="text-[11px] text-warning mt-1">⚠ {m.warning}</p>}
                     <p className="text-xs opacity-30 mt-1 text-right font-mono">{formatTime(m.createTime)}</p>
                   </div>
                 </div>

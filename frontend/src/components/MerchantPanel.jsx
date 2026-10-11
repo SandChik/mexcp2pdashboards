@@ -13,6 +13,8 @@ import { askConfirm } from './confirm';
 import OrderDetailModal from './OrderDetailModal';
 import AdModal from './AdModal';
 import BingxAdModal from './BingxAdModal';
+import GateAdModal from './GateAdModal';
+import { PLATFORMS } from './helpers';
 import {
   Power, MessageSquare, ToggleLeft, ToggleRight, RefreshCw, MoreVertical, Pencil, Clock, AlertTriangle, Pause, Play, UserX, Coins, CheckCircle2,
   Landmark, WifiOff, Plus, Check, X,
@@ -33,6 +35,11 @@ import toast from 'react-hot-toast';
  *   - FTD stat capture — MEXC only (BingX exposes no per-buyer statistics)
  *   - ad field names (normalized by adView below) and the ad editor modal
  *   - the "BingX: N dari M order dibaca" range diagnostic line
+ *
+ * v79 — Gate joins with the capability flags below instead of a third set of
+ * `isX` checks: Gate has a balance cell, "Iklan baru", quick price, the range
+ * diagnostic line (like BingX) AND a merchant switch (like MEXC: Gate's
+ * work status). FTD stays MEXC-only.
  */
 
 const ORDER_FILTERS = [
@@ -52,14 +59,28 @@ function fmtRemaining(ms) {
   return h > 0 ? `${h}:${p(m)}:${p(ss)}` : `${m}:${p(ss)}`;
 }
 
-// The two platforms name ad fields differently; the card reads this instead.
-function adView(ad, isBingx) {
-  if (isBingx) {
+// The platforms name ad fields differently; the card reads this instead.
+function adView(ad, platform) {
+  if (platform === 'bingx') {
     return {
       no: ad.advNo, open: ad.advStatus === 'OPEN',
       price: ad.priceType === 2 ? `${ad.floatRatio}% mengambang` : formatAmount(ad.price, 2),
       available: formatAmount(ad.availableAmount, 2) + (ad.totalNumber ? ` / ${formatAmount(ad.totalNumber, 2)}` : ''),
       limit: `${formatCompact(ad.minAmount)}–${formatCompact(ad.maxAmount)}`,
+      pay: ad.payMethodNames?.length ? ad.payMethodNames.join(' · ') : null,
+      hidden: ad.hidePaymentInfo === 1,
+    };
+  }
+  if (platform === 'gate') {
+    // Limits come back in crypto; `limit_fiat` is the fiat equivalent and is
+    // what the card shows when present (same reading as the MEXC card).
+    return {
+      no: ad.advNo, open: ad.advStatus === 'OPEN',
+      closed: ad.gateStatus === 'CLOSED' || ad.gateStatus === 'CANCEL', // final: cannot be re-listed
+      price: ad.priceType === 2 ? `${ad.floatTrend === 1 ? '−' : '+'}${ad.floatRatio}% mengambang` : formatAmount(ad.price, 2),
+      available: formatAmount(ad.availableAmount, 2),
+      limit: `${formatCompact(ad.minAmount)}–${formatCompact(ad.maxAmount)}`,
+      limitUnit: ad.limitFiat ? ad.fiatUnit : ad.coinName,
       pay: ad.payMethodNames?.length ? ad.payMethodNames.join(' · ') : null,
       hidden: ad.hidePaymentInfo === 1,
     };
@@ -74,8 +95,17 @@ function adView(ad, isBingx) {
 }
 
 export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRefresh }) {
-  const isBingx = (merchant.platform || 'mexc') === 'bingx';
-  const platformLabel = isBingx ? 'BingX' : 'MEXC';
+  const platform = PLATFORMS[merchant.platform] ? merchant.platform : 'mexc';
+  const isBingx = platform === 'bingx';
+  const isGate = platform === 'gate';
+  const isExt = platform !== 'mexc';          // "not MEXC": house-shaped by a backend adapter
+  const platformLabel = PLATFORMS[platform].label;
+  // Capability flags — what this platform's API can do from the dashboard.
+  const hasBalance = isExt;                   // Saldo cell (BingX fund / Gate spot)
+  const canCreateAd = isExt;                  // "Iklan baru" (MEXC's API can't create ads)
+  const canQuickPrice = isExt;                // inline price box on the ad card
+  const hasServiceSwitch = !isBingx;          // MEXC service switch / Gate work status
+  const hasFtd = !isExt;                      // FTD snapshots: MEXC only
 
   const [orders, setOrders]           = useState([]);
   const [ads, setAds]                 = useState([]);
@@ -167,7 +197,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     const pending = orders.filter(o => o.advOrderNo && !(o.advOrderNo in nameMapRef.current));
     const active = pending.filter(o => isRunning(o._state));
     const rest = pending.filter(o => !isRunning(o._state));
-    const missing = active.concat(rest).slice(0, isBingx ? 20 : 30).map(o => o.advOrderNo);
+    const missing = active.concat(rest).slice(0, isExt ? 20 : 30).map(o => o.advOrderNo);
     if (missing.length === 0) return;
     let cancelled = false;
     ordersApi.memberIds(merchant.id, missing).then(r => {
@@ -176,17 +206,24 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       setNameMap(prev => { const next = { ...prev, ...map }; nameMapRef.current = next; return next; });
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [orders, merchant.id, isBingx]);
+  }, [orders, merchant.id, isExt]);
 
   // Remembered pause state for this merchant
   useEffect(() => { merchantApi.getPauseState(merchant.id).then(r => setPausedAds(r.data?.ads || [])).catch(() => {}); }, [merchant.id]);
 
-  // BingX: fund-account balance for the Saldo cell (and after every release)
+  // BingX fund / Gate spot balance for the Saldo cell (and after every release)
   const fetchBalance = useCallback(() => {
-    if (!isBingx) return;
+    if (!hasBalance) return;
     merchantApi.balance(merchant.id).then(r => setBalance(r.data || null)).catch(() => {});
-  }, [merchant.id, isBingx]);
-  useEffect(() => { if (!isBingx) return; fetchBalance(); const t = setInterval(fetchBalance, 30000); return () => clearInterval(t); }, [fetchBalance, isBingx]);
+  }, [merchant.id, hasBalance]);
+  useEffect(() => { if (!hasBalance) return; fetchBalance(); const t = setInterval(fetchBalance, 30000); return () => clearInterval(t); }, [fetchBalance, hasBalance]);
+
+  // Gate: the merchant switch has a readable state (work status) — show it
+  // instead of assuming "open" like the MEXC panel has to.
+  useEffect(() => {
+    if (!isGate) return;
+    merchantApi.account(merchant.id).then(r => { if (typeof r.data?.open === 'boolean') setServiceOpen(r.data.open); }).catch(() => {});
+  }, [merchant.id, isGate]);
 
   // 1s tick driving the countdown badges
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
@@ -210,9 +247,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         : await ordersApi.market(merchant.id, params);
       const raw = r.data;
       const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-      if (isBingx && !quick) setRangeMeta(raw?.meta || null);
-      let normalized = list.map(o => (isBingx
-        ? { ...o, _state: normalizeState(o.state), platform: 'bingx' }
+      if (isExt && !quick) setRangeMeta(raw?.meta || null);
+      let normalized = list.map(o => (isExt
+        ? { ...o, _state: normalizeState(o.state), platform }
         : { ...o, _state: normalizeState(o.state) }));
       if (quick) {
         // Merge: fresh rows win; anything outside the quick window is carried
@@ -229,7 +266,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       // sees a change first announces it and the other stays quiet.
       const { states: ns, unread: nu } = announceOrderChanges({
         merchantId: merchant.id,
-        merchantName: isBingx ? `${merchant.name} (BingX)` : merchant.name,
+        merchantName: isExt ? `${merchant.name} (${platformLabel})` : merchant.name,
         orders: normalized,
         prevStates: prevStates.current,
         prevUnread: prevUnread.current,
@@ -237,7 +274,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       });
       prevStates.current = ns; prevUnread.current = nu; initialized.current = true;
       ordersRef.current = normalized;
-      ingestOrders(merchant.id, merchant.name, isBingx ? 'bingx' : 'mexc', normalized); // queue sees it the same instant (v66)
+      ingestOrders(merchant.id, merchant.name, platform, normalized); // queue sees it the same instant (v66)
       setOrders(normalized); setLastSync(Date.now()); setSyncError(false); syncErrorRef.current = false;
     } catch (e) {
       // Sound only on the transition into an error state, not every 5s poll.
@@ -249,7 +286,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       setLoading(false); setRefreshing(false); busyRef.current = false;
       if (pendingFullRef.current) { pendingFullRef.current = false; doFetch(false, false); }
     }
-  }, [merchant.id, merchant.name, isBingx, platformLabel]);
+  }, [merchant.id, merchant.name, isExt, platform, platformLabel]);
 
   const fetchAds = useCallback(async () => {
     try {
@@ -260,9 +297,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   }, [merchant.id]);
 
   // Snapshot buyer trade stats for in-progress SELL orders (MEXC drops them
-  // once DONE). MEXC only — BingX has no such statistics.
+  // once DONE). MEXC only — BingX / Gate have no such statistics.
   useEffect(() => {
-    if (isBingx) return;
+    if (!hasFtd) return;
     const toCapture = orders
       .filter(o => o.side === 'SELL' && [0, 1, 2, 3].includes(o._state) && o.advOrderNo && !capturedRef.current.has(o.advOrderNo))
       .map(o => o.advOrderNo);
@@ -324,7 +361,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
   });
   const activeOrders = orders.filter(o => isRunning(o._state));
   const unread = orders.reduce((a, o) => a + (o.unreadCount || 0), 0);
-  const liveAds = ads.filter(a => adView(a, isBingx).open);
+  const liveAds = ads.filter(a => adView(a, platform).open);
   const filteredAds = adFilter === 'ALL' ? ads : ads.filter(a => a.side === adFilter);
 
   const doneOrders = orders.filter(o => o._state === 4);
@@ -360,8 +397,12 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
 
   async function toggleService() {
     const open = !serviceOpen;
-    try { await merchantApi.serviceSwitch(merchant.id, open); setServiceOpen(open); toast.success(open ? 'Merchant open' : 'Merchant closed'); }
-    catch { toast.error('Switch failed'); }
+    try {
+      const r = await merchantApi.serviceSwitch(merchant.id, open);
+      if (r.data && r.data.code !== undefined && r.data.code !== 0) throw new Error(r.data.msg || r.data.message || 'error');
+      setServiceOpen(open); toast.success(open ? 'Merchant open' : 'Merchant closed');
+    }
+    catch (e) { toast.error(`Switch failed: ${e.response?.data?.error || e.message}`); }
     setMenuOpen(false);
   }
 
@@ -398,9 +439,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     catch { setAutoReplyEnabled(!v); toast.error('Failed to save setting'); }
   }
 
-  // MEXC needs the whole ad echoed back on a status change; BingX takes the id.
+  // MEXC needs the whole ad echoed back on a status change; BingX / Gate take the id.
   function buildAdParams(ad) {
-    if (isBingx) return { advNo: ad.advNo };
+    if (isExt) return { advNo: ad.advNo };
     return {
       advNo: ad.advNo || ad.davNo, side: ad.side, fiatUnit: ad.fiatUnit, coinId: ad.coinId, price: ad.price,
       availableQuantity: ad.availableQuantity,
@@ -419,11 +460,12 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     const r = await adsApi.toggleStatus(merchant.id, buildAdParams(ad), status);
     return r.data || {};
   }
-  const isCooldown = (d) => !isBingx && (d.cooldown || d.code === 30014 || d.code === 30020);
+  const isCooldown = (d) => !isExt && (d.cooldown || d.code === 30014 || d.code === 30020);
 
   async function toggleAdStatus(ad, e) {
     e.stopPropagation();
-    const v = adView(ad, isBingx);
+    const v = adView(ad, platform);
+    if (v.closed) { toast.error('Iklan ini sudah ditutup permanen di Gate — buat iklan baru.'); return; }
     setTogglingAd(v.no);
     try {
       const d = await setAdStatus(ad, v.open ? 'CLOSE' : 'OPEN');
@@ -434,7 +476,8 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     finally { setTogglingAd(null); }
   }
 
-  // BingX only: one modifyPrice call straight from the card.
+  // BingX / Gate: price change straight from the card (BingX modifyPrice;
+  // Gate re-submits the ad with only the price changed).
   async function saveQuickPrice(ad) {
     if (!priceEdit || priceEdit.advNo !== ad.advNo) return;
     const v = String(priceEdit.value).trim();
@@ -443,10 +486,10 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     setTogglingAd(ad.advNo);
     try {
       const r = await adsApi.setPrice(merchant.id, ad.priceType === 2
-        ? { advNo: ad.advNo, priceType: 2, floatRatio: v }
+        ? { advNo: ad.advNo, priceType: 2, floatRatio: v, ...(isGate ? { floatTrend: ad.floatTrend } : {}) }
         : { advNo: ad.advNo, priceType: 1, fixedPrice: v });
       if (r.data?.code === 0) { toast.success(`Harga → ${v}${ad.priceType === 2 ? '%' : ''}`); setPriceEdit(null); fetchAds(); }
-      else toast.error(`BingX menolak: ${r.data?.msg || 'error'}`);
+      else toast.error(`${platformLabel} menolak: ${r.data?.msg || 'error'}`);
     } catch (e) { toast.error(e.response?.data?.msg || e.message); }
     finally { setTogglingAd(null); }
   }
@@ -465,13 +508,13 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       // Use what's on screen (includes an ad you just enabled) instead of
       // re-fetching, because MEXC's ad list lags right after a toggle.
       const current = ads.length ? ads : await freshAds();
-      const openAds = current.filter(a => adView(a, isBingx).open);
+      const openAds = current.filter(a => adView(a, platform).open);
       if (openAds.length === 0) { toast.error(`${merchant.name}: no live ads to pause`, { id: tid }); return; }
       const okToPause = await askConfirm({ title: `Pause trading — ${merchant.name}`, message: `This closes all ${openAds.length} live ad(s) and remembers them. Resume turns them back on.`, confirmText: 'Pause all ads', danger: true });
       if (!okToPause) { toast.dismiss(tid); return; }
       const closed = [], failed = [];
       for (const ad of openAds) {
-        const no = adView(ad, isBingx).no;
+        const no = adView(ad, platform).no;
         try { const d = await setAdStatus(ad, 'CLOSE'); if (d.code === 0) closed.push(no); else failed.push({ price: ad.price, msg: isCooldown(d) ? 'wait ~60s (edited too recently)' : (d.msg || 'error') }); }
         catch { failed.push({ price: ad.price, msg: 'request failed' }); }
       }
@@ -491,13 +534,13 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       let snapshot = pausedAds, pausedAt = 0;
       try { const r = await merchantApi.getPauseState(merchant.id); snapshot = r.data?.ads || pausedAds; pausedAt = r.data?.pausedAt || 0; } catch { /* */ }
       const current = await freshAds();
-      const targets = current.filter(a => snapshot.includes(adView(a, isBingx).no));
+      const targets = current.filter(a => snapshot.includes(adView(a, platform).no));
       if (targets.length === 0) {
         await merchantApi.setPauseState(merchant.id, false, []).catch(() => {});
         setPausedAds([]); toast.error(`${merchant.name}: no paused ads found to resume`, { id: tid }); return;
       }
       // MEXC blocks editing an ad <60s after the last change — wait it out automatically.
-      const until = !isBingx && pausedAt ? pausedAt + 60000 : 0;
+      const until = !isExt && pausedAt ? pausedAt + 60000 : 0;
       while (until && Date.now() < until) {
         const sec = Math.ceil((until - Date.now()) / 1000);
         toast.loading(`Cooldown — opening in ${sec}s...`, { id: tid });
@@ -506,7 +549,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       toast.loading(`Resuming ${merchant.name}...`, { id: tid });
       const failedNos = [], failed = []; let ok = 0;
       for (const ad of targets) {
-        const no = adView(ad, isBingx).no;
+        const no = adView(ad, platform).no;
         try {
           const d = await setAdStatus(ad, 'OPEN');
           if (d.code === 0) ok++;
@@ -527,8 +570,8 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
     : (serviceOpen ? 'bg-buy shadow-glow-buy animate-pulse' : 'bg-sell');
 
   const statCells = [
-    ...(isBingx ? [{
-      label: 'Saldo USDT',
+    ...(hasBalance ? [{
+      label: `Saldo ${merchant.asset || 'USDT'}`,
       value: balance === null ? '…' : (balance.free === null ? 'n/a' : formatAmount(balance.free, 2)),
       color: 'text-buy', bar: 'bg-buy',
       title: balance?.error ? `Saldo tidak terbaca: ${balance.error}` : (balance?.source ? `Akun ${balance.source}${Number(balance.locked) > 0 ? ` · terkunci ${formatAmount(balance.locked, 2)}` : ''}` : ''),
@@ -545,7 +588,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
       <div className="px-3 sm:px-3.5 pt-3 pb-3 border-b border-surface-700">
         <div className="flex items-center justify-between h-6">
           <div className="flex items-center gap-2 min-w-0">
-            <img src={isBingx ? '/brand/bingx.png' : '/brand/mexc.png'} alt={platformLabel} className="w-5 h-5 rounded-md flex-shrink-0 bg-white" />
+            <img src={PLATFORMS[platform].logo} alt={platformLabel} className="w-5 h-5 rounded-md flex-shrink-0 bg-white" />
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotClass}`} />
             <span className="font-semibold text-surface-50 text-sm truncate">{merchant.name}</span>
             {refreshing && <RefreshCw size={11} className="text-brand-400 animate-spin flex-shrink-0" />}
@@ -586,12 +629,15 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                       <Play size={13} /> Resume {pausedAds.length} ad(s)
                     </button>
                   )}
-                  {!isBingx && (
+                  {hasServiceSwitch && (
                     <>
                       <div className="h-px bg-surface-700 my-1" />
                       <button onClick={toggleService}
+                        title={isGate ? 'Gate: status kerja merchant (set_merchant_work_hours) — istirahat menyembunyikan iklan Anda' : undefined}
                         className={`w-full flex items-center gap-2 text-xs rounded px-2 py-1.5 transition-colors ${serviceOpen ? 'text-sell hover:bg-sell/10' : 'text-buy hover:bg-buy/10'}`}>
-                        <Power size={13} /> {serviceOpen ? 'Close merchant (freeze API)' : 'Open merchant'}
+                        <Power size={13} /> {isGate
+                          ? (serviceOpen ? 'Istirahat (merchant off)' : 'Mulai bekerja (merchant on)')
+                          : (serviceOpen ? 'Close merchant (freeze API)' : 'Open merchant')}
                       </button>
                     </>
                   )}
@@ -611,7 +657,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         </div>
 
         {/* Volume — full numbers, fixed-height cells so panels stay aligned */}
-        <div className={`grid gap-2 mt-2.5 ${isBingx ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+        <div className={`grid gap-2 mt-2.5 ${hasBalance ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
           {statCells.map(s => (
             <div key={s.label} title={s.title || undefined} className="relative bg-surface-900 border border-surface-700 rounded-lg px-2 py-1.5 h-[54px] flex flex-col justify-center overflow-hidden">
               <span className={`absolute left-0 top-2 bottom-2 w-[2px] rounded-full ${s.bar}`} />
@@ -651,17 +697,17 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
               </button>
             ))}
           </div>
-          {isBingx && rangeMeta && (
-            // What BingX actually handed over for this range — the honest answer
-            // to "why is last week missing": either BingX only has N orders in
-            // total, or the walk hit its page budget.
+          {isExt && rangeMeta && (
+            // What the exchange actually handed over for this range — the honest
+            // answer to "why is last week missing": either it only has N orders
+            // in total, or the walk hit its page budget.
             <p className={`text-[10px] font-mono mt-1.5 ${rangeMeta.truncated ? 'text-warning' : 'text-surface-300/80'}`}
               title={`stop=${rangeMeta.stop} · halaman ${rangeMeta.pages} × ${rangeMeta.pageSize}`}>
-              BingX: {rangeMeta.fetched}{rangeMeta.total ? ` dari ${rangeMeta.total}` : ''} order dibaca
+              {platformLabel}: {rangeMeta.fetched}{rangeMeta.total ? ` dari ${rangeMeta.total}` : ''} order dibaca
               {rangeMeta.oldest ? ` · tertua ${formatTime(rangeMeta.oldest)}` : ''}
               {rangeMeta.truncated ? ' · batas halaman tercapai, riwayat lebih lama tidak dimuat' : ''}
               {!rangeMeta.truncated && rangeMeta.total && rangeMeta.fetched >= rangeMeta.total && rangeMeta.oldest && rangeMeta.oldest > rangeMeta.start
-                ? ' · BingX tidak punya order lebih lama dari ini' : ''}
+                ? ` · ${platformLabel} tidak punya order lebih lama dari ini` : ''}
             </p>
           )}
         </div>
@@ -676,7 +722,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
         ) : tab === 'orders' ? (
           filteredOrders.length === 0 ? (
             <div className="text-center py-12 px-6">
-              <p className="text-sm text-surface-200">{orders.length === 0 ? `Belum ada order ${isBingx ? 'BingX ' : ''}pada rentang ini.` : 'Tidak ada order dengan filter ini.'}</p>
+              <p className="text-sm text-surface-200">{orders.length === 0 ? `Belum ada order ${isExt ? platformLabel + ' ' : ''}pada rentang ini.` : 'Tidak ada order dengan filter ini.'}</p>
               <p className="text-xs text-surface-300 mt-1">{orders.length === 0 ? 'Coba ubah rentang tanggal di kanan atas.' : 'Pilih filter lain untuk melihat order yang ada.'}</p>
             </div>
           ) : filteredOrders.map(order => {
@@ -764,7 +810,7 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           })
         ) : (
           <div className="p-2.5 sm:p-3 space-y-2.5">
-            {isBingx && (
+            {canCreateAd && (
               <button onClick={() => { setEditAd(null); setShowAdModal(true); }}
                 className="w-full flex items-center justify-center gap-1.5 text-xs font-medium rounded-lg h-9 border border-dashed border-surface-600 text-surface-200 hover:text-surface-50 hover:border-surface-500 transition-colors">
                 <Plus size={13} /> Iklan baru
@@ -773,18 +819,19 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
             {filteredAds.length === 0 ? (
               <div className="text-center py-12 px-6">
                 <p className="text-sm text-surface-200">Belum ada iklan.</p>
-                <p className="text-xs text-surface-300 mt-1">{isBingx ? 'Buat dari tombol di atas — langsung tayang di pasar BingX.' : 'Buat iklan lewat aplikasi MEXC, lalu refresh panel ini.'}</p>
+                <p className="text-xs text-surface-300 mt-1">{canCreateAd ? `Buat dari tombol di atas — langsung tayang di pasar ${platformLabel}.` : 'Buat iklan lewat aplikasi MEXC, lalu refresh panel ini.'}</p>
               </div>
             ) : filteredAds.map(ad => {
-              const v = adView(ad, isBingx);
+              const v = adView(ad, platform);
               const busy = togglingAd === v.no;
-              const editing = isBingx && priceEdit?.advNo === v.no;
+              const editing = canQuickPrice && priceEdit?.advNo === v.no;
               return (
                 <div key={v.no} className={`bg-surface-900 border rounded-xl p-3 transition-all card-hover ${v.open ? 'border-surface-700' : 'border-surface-700/50 opacity-60'}`}>
                   <div className="flex items-center justify-between mb-2.5">
                     <div className="flex items-center gap-1.5">
                       <SideBadge side={ad.side} /><AdStatusBadge status={ad.advStatus} />
                       {pausedAds.includes(v.no) && <span className="text-[10px] text-warning">dijeda</span>}
+                      {v.closed && <span className="text-[10px] text-sell" title={`Status Gate: ${ad.gateStatus}`}>ditutup</span>}
                     </div>
                     <button onClick={e => toggleAdStatus(ad, e)} disabled={busy} title={v.open ? 'Pause ad' : 'Activate ad'}
                       className={`transition-colors disabled:opacity-40 ${v.open ? 'text-buy hover:text-sell' : 'text-surface-300 hover:text-buy'}`}>
@@ -806,24 +853,24 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
                         <button onClick={() => setPriceEdit(null)} title="Batal (Esc)"
                           className="w-7 h-7 flex items-center justify-center rounded-md text-surface-300 hover:bg-surface-700"><X size={13} /></button>
                       </div>
-                    ) : isBingx ? (
+                    ) : canQuickPrice ? (
                       <button onClick={() => setPriceEdit({ advNo: v.no, value: ad.priceType === 2 ? ad.floatRatio : ad.price })}
-                        title="Ubah harga cepat (satu panggilan modifyPrice)"
+                        title={isGate ? 'Ubah harga cepat (iklan dikirim ulang ke Gate dengan harga baru)' : 'Ubah harga cepat (satu panggilan modifyPrice)'}
                         className="group flex items-center gap-1.5 text-lg font-mono font-semibold text-surface-50 hover:text-brand-300 transition-colors">
                         {v.price}<Pencil size={11} className="text-surface-300 group-hover:text-brand-300" />
                       </button>
                     ) : (
                       <span className="text-lg font-mono font-semibold text-surface-50">{v.price}</span>
                     )}
-                    <span className="text-xs text-surface-300 font-mono">{ad.fiatUnit} / USDT</span>
+                    <span className="text-xs text-surface-300 font-mono">{ad.fiatUnit} / {ad.coinName || 'USDT'}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs mb-3">
                     <div className="bg-surface-800 rounded-md px-2 py-1.5">
                       <p className="text-surface-300 text-[10px] uppercase tracking-wide">Available</p>
-                      <p className="text-surface-50 font-mono">{v.available} USDT</p>
+                      <p className="text-surface-50 font-mono">{v.available} {ad.coinName || 'USDT'}</p>
                     </div>
                     <div className="bg-surface-800 rounded-md px-2 py-1.5">
-                      <p className="text-surface-300 text-[10px] uppercase tracking-wide">Limit ({ad.fiatUnit})</p>
+                      <p className="text-surface-300 text-[10px] uppercase tracking-wide">Limit ({v.limitUnit || ad.fiatUnit})</p>
                       <p className="text-surface-50 font-mono">{v.limit}</p>
                     </div>
                     {v.pay && (
@@ -850,12 +897,17 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
           onClose={() => { setSelectedOrder(null); setOpenChatOrder(null); doFetch(false, true); fetchAds(); }}
           onActionDone={() => { doFetch(false, true); fetchBalance(); }} />
       )}
-      {showAdModal && !isBingx && editAd && (
+      {showAdModal && platform === 'mexc' && editAd && (
         <AdModal merchantId={merchant.id} existingAd={editAd}
           onClose={() => { setShowAdModal(false); setEditAd(null); }} onSaved={fetchAds} />
       )}
       {showAdModal && isBingx && (
         <BingxAdModal merchant={merchant} existingAd={editAd}
+          onClose={() => { setShowAdModal(false); setEditAd(null); }}
+          onSaved={() => { fetchAds(); fetchBalance(); }} />
+      )}
+      {showAdModal && isGate && (
+        <GateAdModal merchant={merchant} existingAd={editAd}
           onClose={() => { setShowAdModal(false); setEditAd(null); }}
           onSaved={() => { fetchAds(); fetchBalance(); }} />
       )}

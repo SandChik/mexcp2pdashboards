@@ -55,7 +55,7 @@ async function verifyWithDetail(merchantId, advOrderNo, intent) {
     if (intent === 'confirm' && okConfirm) return { ok: true, detail: data };
     return { ok: false, detail: data, reason: `Status order sudah berubah (${ORDER_STATES[st]?.label || st}). Buka detail untuk mengecek.` };
   } catch {
-    return { ok: false, reason: 'Tidak bisa memverifikasi order ke MEXC. Coba lagi.' };
+    return { ok: false, reason: 'Tidak bisa memverifikasi order ke bursa. Coba lagi.' };
   }
 }
 
@@ -141,7 +141,10 @@ export async function confirmPaidOrder(merchantId, order, { skipConfirm = false 
       toast.error('Metode bayar tidak ditemukan — buka detail order untuk pilih manual.');
       return false;
     }
-    const r = await ordersApi.confirmPaid(merchantId, order.advOrderNo, parseInt(payId));
+    // Gate identifies the method by pay TYPE ("bank"), not a numeric id — the
+    // backend resolves it from the order itself, so pass the string through.
+    const isGate = (order.platform || data.platform) === 'gate';
+    const r = await ordersApi.confirmPaid(merchantId, order.advOrderNo, isGate ? String(payId) : parseInt(payId));
     if (r.data?.code === 0) {
       toast.success(`Pembayaran dikonfirmasi — ${amt}`);
       return true;

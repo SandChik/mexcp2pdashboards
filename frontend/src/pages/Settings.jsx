@@ -11,7 +11,7 @@ import { PlatformBadge, PLATFORMS } from '../components/helpers';
 import { invalidateQueueMerchants, refreshQueue } from '../actionQueue';
 
 // Per-platform caps — mirrored from backend/routes/merchants.js.
-const PLATFORM_MAX = { mexc: 5, bingx: 2 };
+const PLATFORM_MAX = { mexc: 5, bingx: 2, gate: 3 };
 import toast from 'react-hot-toast';
 import { askConfirm } from '../components/confirm';
 
@@ -21,6 +21,9 @@ function MerchantForm({ existing, onSave, onCancel }) {
     apiKey: existing?.apiKey || '',
     apiSecret: '',
     platform: existing?.platform || 'mexc',
+    // Gate: every order-list call needs the fiat + crypto pair.
+    fiat: existing?.fiat || 'IDR',
+    asset: existing?.asset || 'USDT',
   });
   const [showSecret, setShowSecret] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -85,10 +88,27 @@ function MerchantForm({ existing, onSave, onCancel }) {
           value={form.apiKey}
           onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))}
           required={!existing}
-          placeholder={form.platform === 'bingx' ? 'API key BingX (akun merchant P2P)' : 'mx0v...'}
+          placeholder={form.platform === 'bingx' ? 'API key BingX (akun merchant P2P)' : form.platform === 'gate' ? 'APIv4 Key Gate (akun merchant P2P)' : 'mx0v...'}
           className="w-full bg-surface-900 border border-surface-200/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-brand-500 transition-colors font-mono"
         />
+        {form.platform === 'gate' && <p className="text-[11px] text-surface-200/40 font-mono mt-1">Gate: buat di Account → APIv4 Keys; aktifkan izin Spot (read, untuk saldo) + P2P/merchant. Pasang whitelist IP server bila ada.</p>}
       </div>
+
+      {form.platform === 'gate' && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-mono text-surface-200/40 uppercase tracking-wider mb-1">Fiat</label>
+            <input value={form.fiat} onChange={e => setForm(f => ({ ...f, fiat: e.target.value.toUpperCase() }))} required placeholder="IDR" maxLength={6}
+              className="w-full bg-surface-900 border border-surface-200/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-brand-500 transition-colors font-mono" />
+          </div>
+          <div>
+            <label className="block text-xs font-mono text-surface-200/40 uppercase tracking-wider mb-1">Kripto</label>
+            <input value={form.asset} onChange={e => setForm(f => ({ ...f, asset: e.target.value.toUpperCase() }))} required placeholder="USDT" maxLength={6}
+              className="w-full bg-surface-900 border border-surface-200/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-brand-500 transition-colors font-mono" />
+          </div>
+          <p className="col-span-2 text-[11px] text-surface-200/40 font-mono -mt-1">Gate mewajibkan pasangan fiat/kripto di setiap daftar order — panel ini hanya membaca pasangan tersebut.</p>
+        </div>
+      )}
 
       <div>
         <label className="block text-xs font-mono text-surface-200/40 uppercase tracking-wider mb-1">
@@ -232,16 +252,17 @@ export default function Settings() {
   const countOn = (p) => merchants.filter(m => (m.platform || 'mexc') === p).length;
   const canAdd = Object.keys(PLATFORM_MAX).some(p => countOn(p) < PLATFORM_MAX[p]);
 
-  // "Tes koneksi" for BingX: the probe, from the dashboard. post=true adds ONE
-  // no-op write (first ad's price rewritten to its current value) to confirm
-  // the POST body format — the operator chooses, it is never automatic.
+  // "Tes koneksi" for BingX / Gate: the probe, from the dashboard. BingX only:
+  // post=true adds ONE no-op write (first ad's price rewritten to its current
+  // value) to confirm the POST body format — the operator chooses, never automatic.
   async function runTest(m, post) {
     if (post && !await askConfirm({ title: 'Uji POST ke BingX?', message: 'Harga iklan pertama akan ditulis ulang ke nilai yang SAMA PERSIS (tidak ada perubahan), untuk memastikan format POST diterima BingX.', confirmText: 'Jalankan', danger: true })) return;
     setTesting(m.id);
+    const label = m.platform === 'gate' ? 'Gate' : 'BingX';
     try {
-      const r = await merchantApi.bingxTest(m.id, post);
+      const r = m.platform === 'gate' ? await merchantApi.gateTest(m.id) : await merchantApi.bingxTest(m.id, post);
       setTestResult(prev => ({ ...prev, [m.id]: r.data }));
-      r.data?.ok ? toast.success(`BingX ${m.name}: koneksi OK`) : toast.error(`BingX ${m.name}: ada langkah yang gagal`);
+      r.data?.ok ? toast.success(`${label} ${m.name}: koneksi OK`) : toast.error(`${label} ${m.name}: ada langkah yang gagal`);
     } catch (e) {
       toast.error(e.response?.data?.error || e.message);
     } finally { setTesting(null); }
@@ -330,17 +351,20 @@ export default function Settings() {
                       <div className="min-w-0">
                         <p className="text-white font-display font-semibold text-sm flex items-center gap-2">{m.name} <PlatformBadge platform={m.platform || 'mexc'} /></p>
                         <p className="text-xs text-surface-200/40 font-mono mt-0.5 truncate">{m.apiKey}</p>
-                        {m.platform === 'bingx' && (
+                        {m.platform === 'gate' && <p className="text-[11px] text-surface-200/40 font-mono">{m.asset || 'USDT'} / {m.fiat || 'IDR'}</p>}
+                        {(m.platform === 'bingx' || m.platform === 'gate') && (
                           <div className="mt-2">
                             <div className="flex flex-wrap gap-1.5">
                               <button onClick={() => runTest(m, false)} disabled={testing === m.id}
                                 className="flex items-center gap-1 text-[11px] font-mono rounded-md px-2 py-1 border border-surface-200/10 text-surface-200 hover:text-white hover:bg-surface-700 disabled:opacity-50 transition-colors">
                                 <Activity size={11} className={testing === m.id ? 'animate-pulse' : ''} /> Tes koneksi (baca)
                               </button>
-                              <button onClick={() => runTest(m, true)} disabled={testing === m.id}
-                                className="flex items-center gap-1 text-[11px] font-mono rounded-md px-2 py-1 border border-warning/30 text-warning hover:bg-warning/10 disabled:opacity-50 transition-colors">
-                                <Activity size={11} /> + uji POST (no-op)
-                              </button>
+                              {m.platform === 'bingx' && (
+                                <button onClick={() => runTest(m, true)} disabled={testing === m.id}
+                                  className="flex items-center gap-1 text-[11px] font-mono rounded-md px-2 py-1 border border-warning/30 text-warning hover:bg-warning/10 disabled:opacity-50 transition-colors">
+                                  <Activity size={11} /> + uji POST (no-op)
+                                </button>
+                              )}
                             </div>
                             {testResult[m.id] && (
                               <div className="mt-2 bg-surface-900 rounded-lg p-2.5 text-[11px] font-mono space-y-1">
@@ -354,8 +378,14 @@ export default function Settings() {
                                     {testResult[m.id].post.ok ? <CheckCircle2 size={11} /> : <XCircle size={11} />} POST modifyPrice (mode {testResult[m.id].postMode}) {testResult[m.id].post.ok ? '· OK' : `· ${testResult[m.id].post.code ?? ''} ${testResult[m.id].post.msg}`}
                                   </p>
                                 )}
+                                {testResult[m.id].account && (
+                                  <p className="text-surface-200/50">
+                                    akun <b className="text-surface-100">{testResult[m.id].account.userName || '—'}</b> · status kerja {testResult[m.id].account.workStatus ?? '?'} · online {testResult[m.id].account.onlineStatus ?? '?'}
+                                    {testResult[m.id].balance ? ` · saldo spot ${testResult[m.id].balance.free} ${testResult[m.id].asset}` : ''}
+                                  </p>
+                                )}
                                 <p className="text-surface-200/50">
-                                  selisih jam {testResult[m.id].driftMs ?? '?'} ms · {testResult[m.id].orders} order · {testResult[m.id].ads} iklan · format POST: {testResult[m.id].postMode}
+                                  selisih jam {testResult[m.id].driftMs ?? '?'} ms · {testResult[m.id].orders} order · {testResult[m.id].ads} iklan{testResult[m.id].postMode ? ` · format POST: ${testResult[m.id].postMode}` : ''}
                                 </p>
                               </div>
                             )}
@@ -397,8 +427,8 @@ export default function Settings() {
 
           <div className="bg-surface-800/50 border border-surface-200/5 rounded-xl p-4 text-xs text-surface-200/30 font-mono space-y-1">
             <p>• API keys are stored locally on your machine</p>
-            <p>• Maksimal 5 merchant MEXC + 2 merchant BingX</p>
-            <p>• BingX: order masuk Antrian bersama; chat & auto-reply BingX menyusul</p>
+            <p>• Maksimal 5 merchant MEXC + 2 merchant BingX + 3 merchant Gate</p>
+            <p>• BingX & Gate: order masuk Antrian bersama; chat & auto-reply lewat REST</p>
             <p>• Dashboard auto-refreshes every 30 seconds</p>
             <p>• MEXC P2P API v1.3</p>
           </div>

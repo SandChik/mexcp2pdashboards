@@ -1,7 +1,7 @@
 {
   "name": "SandChik P2P Dashboard",
   "short_name": "SandChik P2P",
-  "description": "Dashboard order P2P MEXC & BingX",
+  "description": "Dashboard order P2P MEXC, BingX & Gate",
   "start_url": "/queue",
   "scope": "/",
   "display": "standalone",

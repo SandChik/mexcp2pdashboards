@@ -16,15 +16,18 @@ const VERIFY_PATH = path.join(__dirname, '../data/ad-verify.json');
 function readVerify() { try { return JSON.parse(fs.readFileSync(VERIFY_PATH, 'utf8')); } catch { return {}; } }
 function writeVerify(v) { try { fs.writeFileSync(VERIFY_PATH, JSON.stringify(v, null, 2)); } catch { /* ignore */ } }
 const bxAds = require('../utils/bingxAds');
+const gt = require('../utils/gateOrders');
+const gtAds = require('../utils/gateAds');
 const router = express.Router();
 
-// Uniform error reply for BingX paths: validation errors are 400 with the
-// message, upstream errors keep BingX's own code/msg so the true reason shows.
+// Uniform error reply for BingX/Gate paths: validation errors are 400 with the
+// message, upstream errors keep the exchange's own code/msg so the true reason shows.
 function bingxFail(res, err) {
-  const d = err.bingx || err.response?.data;
+  const d = err.bingx || err.gate || err.response?.data;
   const status = err.status || 500;
   return res.status(status).json({ code: d?.code ?? -1, msg: d?.msg || err.message, error: d?.msg || err.message });
 }
+const gateFail = bingxFail;
 
 const KYC_INT_TO_STR = { 0: 'NONE', 1: 'PRIMARY', 2: 'ADVANCED' };
 
@@ -75,6 +78,10 @@ router.get('/:merchantId', authMiddleware, async (req, res) => {
     try { return res.json({ code: 0, data: await bx.listAds(merchant) }); }
     catch (err) { return res.status(500).json({ code: -1, error: err.message }); }
   }
+  if (gt.isGate(merchant)) {
+    try { return res.json({ code: 0, data: await gt.listAds(merchant) }); }
+    catch (err) { return res.status(500).json({ code: err.gate?.code ?? -1, error: err.message }); }
+  }
   try {
     const all = await fetchAllAds({}, merchant.apiKey, merchant.apiSecret);
     const mem = readVerify();
@@ -90,6 +97,10 @@ router.get('/:merchantId/market', authMiddleware, async (req, res) => {
   if (bx.isBingx(merchant)) {
     try { return res.json({ code: 0, data: await bx.marketAds(merchant, req.query) }); }
     catch (err) { return res.status(500).json({ code: -1, error: err.message }); }
+  }
+  if (gt.isGate(merchant)) {
+    try { return res.json({ code: 0, data: await gt.marketAds(merchant, { asset: req.query.asset, fiatUnit: req.query.fiatUnit, tradeType: req.query.tradeType || req.query.side }) }); }
+    catch (err) { return res.status(500).json({ code: err.gate?.code ?? -1, error: err.message }); }
   }
   try {
     const { fiatUnit, coinId, side, page = 1 } = req.query;
@@ -109,6 +120,13 @@ router.post('/:merchantId', authMiddleware, async (req, res) => {
       audit({ action: req.body.advNo ? 'ad_save' : 'ad_create', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo || result?.data?.advertNo, side: req.body.side, price: req.body.fixedPrice || `${req.body.floatRatio}%`, code: result?.code, msg: result?.msg });
       return res.json(result);
     } catch (err) { return bingxFail(res, err); }
+  }
+  if (gt.isGate(merchant)) {
+    try {
+      const result = await gtAds.saveAd(merchant, req.body);
+      audit({ action: req.body.advNo ? 'ad_save' : 'ad_create', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, side: req.body.side, price: req.body.fixedPrice || `${req.body.floatRatio}%`, code: result?.code, msg: result?.msg });
+      return res.json(result);
+    } catch (err) { return gateFail(res, err); }
   }
   try {
     const body = { ...req.body };
@@ -143,6 +161,14 @@ router.post('/:merchantId/toggle-status', authMiddleware, async (req, res) => {
       audit({ action: req.body.advStatus === 'DELETE' ? 'ad_delete' : 'ad_toggle', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, to: req.body.advStatus, code: result?.code, msg: result?.msg });
       return res.json(result);
     } catch (err) { return bingxFail(res, err); }
+  }
+  if (gt.isGate(merchant)) {
+    // Gate: adv_status 1 listed (OPEN), 3 delisted (CLOSE), 4 closed for good (DELETE).
+    try {
+      const result = await gtAds.setStatus(merchant, req.body.advNo, req.body.advStatus);
+      audit({ action: req.body.advStatus === 'DELETE' ? 'ad_delete' : 'ad_toggle', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, to: req.body.advStatus, code: result?.code, msg: result?.msg });
+      return res.json(result);
+    } catch (err) { return gateFail(res, err); }
   }
 
   try {
@@ -209,12 +235,20 @@ router.post('/:merchantId/toggle-status', authMiddleware, async (req, res) => {
   }
 });
 
-// ── BingX-only ───────────────────────────────────────────────────────
-// POST /api/ads/:merchantId/price — quick price change (modifyPrice)
+// ── BingX / Gate only ────────────────────────────────────────────────
+// POST /api/ads/:merchantId/price — quick price change
+//   BingX: one modifyPrice call. Gate: full re-submit with only the price changed.
 router.post('/:merchantId/price', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
-  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX' });
+  if (gt.isGate(merchant)) {
+    try {
+      const result = await gtAds.setPrice(merchant, req.body);
+      audit({ action: 'ad_price', platform: 'gate', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, price: req.body.fixedPrice || `${req.body.floatRatio}%`, code: result?.code, msg: result?.msg });
+      return res.json(result);
+    } catch (err) { return gateFail(res, err); }
+  }
+  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX / Gate' });
   try {
     const result = await bxAds.setPrice(merchant, req.body);
     audit({ action: 'ad_price', platform: 'bingx', merchantId: merchant.id, merchantName: merchant.name, advNo: req.body.advNo, price: req.body.fixedPrice || `${req.body.floatRatio}%`, code: result?.code, msg: result?.msg });
@@ -223,10 +257,19 @@ router.post('/:merchantId/price', authMiddleware, async (req, res) => {
 });
 
 // GET /api/ads/:merchantId/config?fiatUnit=IDR&tradeType=2 — allowed ranges + market price
+// (BingX assetConfig). Gate has no such endpoint: the form gets the best
+// market price from the public ad list instead, so a typo is visible.
 router.get('/:merchantId/config', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
-  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX' });
+  if (gt.isGate(merchant)) {
+    try {
+      const side = String(req.query.tradeType) === '1' || String(req.query.side).toUpperCase() === 'BUY' ? 'buy' : 'sell';
+      const top = await gt.marketAds(merchant, { fiatUnit: req.query.fiatUnit, tradeType: side });
+      return res.json({ code: 0, data: { marketPrice: top[0]?.price ?? null, topAds: top.slice(0, 5) } });
+    } catch (err) { return res.json({ code: 0, data: { marketPrice: null, error: err.gate?.msg || err.message } }); }
+  }
+  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX / Gate' });
   try { res.json({ code: 0, data: await bxAds.assetConfig(merchant, req.query) }); }
   catch (err) { bingxFail(res, err); }
 });
@@ -235,9 +278,22 @@ router.get('/:merchantId/config', authMiddleware, async (req, res) => {
 router.get('/:merchantId/payment-methods', authMiddleware, async (req, res) => {
   const merchant = getMerchant(req.params.merchantId);
   if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
-  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX' });
+  if (gt.isGate(merchant)) {
+    try { return res.json({ code: 0, data: await gt.myPaymentMethods(merchant, { fresh: req.query.fresh === '1' }) }); }
+    catch (err) { return gateFail(res, err); }
+  }
+  if (!bx.isBingx(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant BingX / Gate' });
   try { res.json({ code: 0, data: await bxAds.myPaymentMethods(merchant) }); }
   catch (err) { bingxFail(res, err); }
+});
+
+// GET /api/ads/:merchantId/detail/:advNo — Gate: raw ad detail (every field, for the edit form)
+router.get('/:merchantId/detail/:advNo', authMiddleware, async (req, res) => {
+  const merchant = getMerchant(req.params.merchantId);
+  if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+  if (!gt.isGate(merchant)) return res.status(400).json({ code: -1, msg: 'Hanya untuk merchant Gate' });
+  try { res.json({ code: 0, data: await gtAds.adDetail(merchant, req.params.advNo) }); }
+  catch (err) { gateFail(res, err); }
 });
 
 module.exports = router;

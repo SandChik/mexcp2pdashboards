@@ -8,7 +8,13 @@ const { claim, release } = require('./autoReplyLedger');
 const { audit } = require('./audit');
 const bx = require('./bingxOrders');
 const bxChat = require('./bingxChat');
+const gt = require('./gateOrders');
+const gtChat = require('./gateChat');
 const verify = require('./verifyChat');
+// BingX and Gate: REST chat, the order number is the room. One lookup keeps
+// every platform branch below a single line.
+const restChat = (m) => (bx.isBingx(m) ? bxChat : gt.isGate(m) ? gtChat : null);
+const restOrders = (m) => (bx.isBingx(m) ? bx : gt.isGate(m) ? gt : null);
 
 /**
  * Auto-reply worker.
@@ -61,9 +67,9 @@ function status(mid) {
 }
 
 /** Resolve conversation id for an order, then ensure a live socket.
- *  BingX: the order number is the room and there is no socket — REST only. */
+ *  BingX / Gate: the order number is the room and there is no socket — REST only. */
 async function openChat(merchant, advOrderNo) {
-  if (bx.isBingx(merchant)) return String(advOrderNo);
+  if (restChat(merchant)) return String(advOrderNo);
   const cr = await mexcGet('/api/v3/fiat/retrieveChatConversation', { orderNo: advOrderNo }, merchant.apiKey, merchant.apiSecret);
   const cid = cr?.data?.conversationId ?? cr?.conversationId;
   if (!cid) throw new Error('no conversationId');
@@ -79,9 +85,10 @@ async function openChat(merchant, advOrderNo) {
 
 /** True when this exact text is already in the conversation, sent by us. */
 async function alreadySaid(merchant, cid, text) {
-  if (bx.isBingx(merchant)) {
+  const rc = restChat(merchant);
+  if (rc) {
     try {
-      const msgs = await bxChat.history(merchant, cid, 30);
+      const msgs = await rc.history(merchant, cid, 30);
       const target = text.trim();
       return msgs.some(m => m.self && String(m.content || '').trim() === target);
     } catch { return false; } // can't verify → the claim ledger is still in force
@@ -210,9 +217,10 @@ async function deliver(merchant, o, matched, dg, budget) {
     // Guard 3: check the conversation itself right before sending.
     if (await alreadySaid(merchant, cid, rule.message)) { dg.lastMatch.result = 'teks yang sama sudah ada di chat'; continue; }
     let r;
-    if (bx.isBingx(merchant)) {
-      try { r = await bxChat.sendText(merchant, cid, rule.message); }
-      catch (e) { r = { success: false, error: e.bingx?.msg || e.message }; }
+    const rc = restChat(merchant);
+    if (rc) {
+      try { r = await rc.sendText(merchant, cid, rule.message); }
+      catch (e) { r = { success: false, error: e.bingx?.msg || e.gate?.msg || e.message }; }
     } else {
       r = wsManager.send(merchant.id, cid, rule.message);
     }
@@ -235,8 +243,8 @@ async function cycle() {
   running = true;
   let sentThisCycle = 0;
   try {
-    // Both platforms. BingX: orders via bingxOrders.fetchQuick (running + latest
-    // ended), chat via REST (history to double-check, sendMsg to send).
+    // All platforms. BingX / Gate: orders via their fetchQuick (running + latest
+    // ended), chat via REST (history to double-check, send to send).
     const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(Boolean);
     if (merchants.length === 0) return;
     const settings = readSettingsSafe();
@@ -257,13 +265,14 @@ async function cycle() {
 
       let orders;
       try {
-        orders = bx.isBingx(merchant)
-          ? (await bx.fetchQuick(merchant)).map(o => ({ ...o, _state: o.state }))
+        const ro = restOrders(merchant);
+        orders = ro
+          ? (await ro.fetchQuick(merchant)).map(o => ({ ...o, _state: o.state }))
           : await fetchRecentOrders(merchant, 24, 3);
         dg.lastError = null;
       }
       catch (e) {
-        dg.lastError = `fetch: ${e.response?.data?.msg || e.bingx?.msg || e.message}`;
+        dg.lastError = `fetch: ${e.response?.data?.msg || e.bingx?.msg || e.gate?.msg || e.message}`;
         console.error(`[autoreply] ${merchant.name}: fetch gagal —`, dg.lastError); continue;
       }
       dg.ordersSeen = orders.length;
@@ -276,7 +285,7 @@ async function cycle() {
       // v77: verification lives in MEXC's chat (OVER_VERIFY_* system messages).
       // Scanned even when auto-reply is off, because the notifier wants these too.
       let verifyEvents = [];
-      if (!bx.isBingx(merchant)) {
+      if (!restOrders(merchant)) { // MEXC only
         verifyEvents = await scanVerifyEvents(merchant, orders, verifySeen, dg);
       }
 

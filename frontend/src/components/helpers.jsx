@@ -19,10 +19,12 @@ export function getBankName(payMethod) {
 // Every merchant belongs to one platform. Orders carry `platform` so the
 // shared queue can label them; merchants saved before v60 are MEXC.
 export const PLATFORMS = {
-  mexc:  { label: 'MEXC',  chip: 'bg-brand-500/15 text-brand-300 ring-brand-500/30' },
-  bingx: { label: 'BingX', chip: 'bg-warning/15 text-warning ring-warning/30' },
+  mexc:  { label: 'MEXC',  chip: 'bg-brand-500/15 text-brand-300 ring-brand-500/30', logo: '/brand/mexc.png' },
+  bingx: { label: 'BingX', chip: 'bg-warning/15 text-warning ring-warning/30',       logo: '/brand/bingx.png' },
+  gate:  { label: 'Gate',  chip: 'bg-cyan-500/15 text-cyan-400 ring-cyan-500/30',    logo: '/brand/gate.svg' }, // v79
 };
 export const platformOf = (x) => (x?.platform && PLATFORMS[x.platform] ? x.platform : 'mexc');
+export const platformLabel = (x) => PLATFORMS[platformOf(x)].label;
 
 /** MEXC keeps appeals out of `state`: `complaining` (list) / `complained` (detail). */
 export const isAppeal = (o) => !!(o && (o.complaining === true || o.complained === true || o._state === 9 || o.state === 9));

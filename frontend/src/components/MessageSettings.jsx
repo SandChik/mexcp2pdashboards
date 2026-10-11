@@ -116,7 +116,7 @@ export default function MessageSettings() {
         <div className="flex gap-2">
           <select value={mid} onChange={e => setMid(e.target.value)} className={sel + ' flex-1 !py-2 !text-sm'}>
             {merchants.length === 0 && <option value="">— belum ada merchant —</option>}
-            {merchants.map(m => <option key={m.id} value={m.id}>{m.name} — {m.platform === 'bingx' ? 'BingX' : 'MEXC'}</option>)}
+            {merchants.map(m => <option key={m.id} value={m.id}>{m.name} — {({ bingx: 'BingX', gate: 'Gate' })[m.platform] || 'MEXC'}</option>)}
           </select>
           {merchants.length > 1 && (
             <button onClick={copyToAll} disabled={saving || !mid} title="Salin template merchant ini ke semua merchant lain"
@@ -126,8 +126,8 @@ export default function MessageSettings() {
           )}
         </div>
         <p className="text-[11px] text-surface-300 mt-1">Template di bawah hanya berlaku untuk <b className="text-surface-200">{merchantName || '—'}</b>. Tiap merchant punya set sendiri.</p>
-        {merchants.find(m => m.id === mid)?.platform === 'bingx' && (
-          <p className="text-[11px] text-surface-300 mt-1">Merchant BingX: dikirim lewat chat REST BingX oleh worker server (tiap 15 detik), aturan yang sama seperti MEXC.</p>
+        {['bingx', 'gate'].includes(merchants.find(m => m.id === mid)?.platform) && (
+          <p className="text-[11px] text-surface-300 mt-1">Merchant {merchants.find(m => m.id === mid)?.platform === 'gate' ? 'Gate' : 'BingX'}: dikirim lewat chat REST oleh worker server (tiap 15 detik), aturan yang sama seperti MEXC. Aturan verifikasi (dokumen/diterima/ditolak) khusus MEXC.</p>
         )}
       </div>
 

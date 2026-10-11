@@ -63,16 +63,21 @@ function recordFromDetail(data, platform) {
     registryTime: ui.registryTime || null,
     bank: bankOfDetail(data),
   };
-  if (platform === 'bingx') rec.platform = 'bingx';
+  if (platform === 'bingx' || platform === 'gate') rec.platform = platform;
   return rec;
 }
 
 // Fetch order detail with the shared uu-cache (one platform hit per order,
-// ever). Platform-aware since v76: BingX details go through the BingX client.
+// ever). Platform-aware since v76: BingX details go through the BingX client,
+// Gate (v79) through the Gate client.
 async function fetchDetail(merchant, advOrderNo) {
   if (merchant.platform === 'bingx') {
     const bx = require('./bingxOrders'); // lazy: bingxOrders requires nothing from here, but keep boot order simple
     return bx.getDetail(merchant, advOrderNo, false);
+  }
+  if (merchant.platform === 'gate') {
+    const gt = require('./gateOrders');
+    return gt.getDetail(merchant, advOrderNo, false);
   }
   const d = await mexcGet('/api/v3/fiat/order/detail', { advOrderNo }, merchant.apiKey, merchant.apiSecret);
   return (d && d.data) || {};
@@ -144,7 +149,7 @@ function captureBuyerLog(merchant, orders, MAX_FETCH = 30) {
       } catch { continue; }
       log[no] = {
         merchantId: merchant.id,
-        platform: merchant.platform === 'bingx' ? 'bingx' : 'mexc',
+        platform: ['bingx', 'gate'].includes(merchant.platform) ? merchant.platform : 'mexc',
         realName: u.realName || null,
         nickName: u.nickName || null,
         memberId: u.memberId || null,

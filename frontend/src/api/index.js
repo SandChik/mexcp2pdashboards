@@ -36,6 +36,8 @@ export const merchantApi = {
   getSettings: (id) => api.get(`/merchants/${id}/settings`),
   setSettings: (id, settings) => api.post(`/merchants/${id}/settings`, settings),
   bingxTest: (id, post = false) => api.post(`/merchants/${id}/bingx-test`, { post }),
+  gateTest: (id) => api.post(`/merchants/${id}/gate-test`),
+  account: (id) => api.get(`/merchants/${id}/account`), // Gate: work/online status
   autoReplyStatus: (id) => api.get(`/merchants/${id}/auto-reply-status`)
 };
 
@@ -54,10 +56,12 @@ export const adsApi = {
   market: (mid, params) => api.get(`/ads/${mid}/market`, { params }),
   saveOrUpdate: (mid, data) => api.post(`/ads/${mid}`, data),
   toggleStatus: (mid, adData, newStatus) => api.post(`/ads/${mid}/toggle-status`, { ...adData, advStatus: newStatus }),
-  // BingX only
+  // BingX + Gate
   setPrice: (mid, data) => api.post(`/ads/${mid}/price`, data),
   config: (mid, params) => api.get(`/ads/${mid}/config`, { params }),
-  paymentMethods: (mid) => api.get(`/ads/${mid}/payment-methods`)
+  paymentMethods: (mid, params) => api.get(`/ads/${mid}/payment-methods`, { params }),
+  // Gate only: every field of one ad (ads_detail)
+  detail: (mid, advNo) => api.get(`/ads/${mid}/detail/${advNo}`)
 };
 
 export const ordersApi = {

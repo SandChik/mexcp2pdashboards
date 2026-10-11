@@ -34,24 +34,24 @@ async function cycle() {
   try {
     const { fetchRecentOrders, normState } = require('./captureCore');
     // v76: BingX merchants take part in the BUYER LOG (their orders are read
-    // through the BingX client). FTD snapshots stay MEXC-only — BingX exposes
-    // no per-buyer trade statistics.
+    // through the BingX client); v79: Gate merchants likewise. FTD snapshots
+    // stay MEXC-only — neither exposes per-buyer trade statistics on the order.
     const merchants = (readConfig().merchants || []).map(m => getMerchant(m.id)).filter(Boolean);
     if (merchants.length === 0) return;
     const settings = readSettings();
 
     for (const merchant of merchants) {
-      const isBingx = merchant.platform === 'bingx';
-      if (isBingx && !settings[merchant.id]?.buyerLog) continue; // nothing else to do for BingX
+      const isBingx = merchant.platform === 'bingx' || merchant.platform === 'gate'; // "not MEXC": buyer log only
+      if (isBingx && !settings[merchant.id]?.buyerLog) continue; // nothing else to do for BingX / Gate
       let orders;
       try {
         if (isBingx) {
-          const bx = require('./bingxOrders');
+          const client = merchant.platform === 'gate' ? require('./gateOrders') : require('./bingxOrders');
           const cutoff = Date.now() - 24 * 3600000;
-          orders = (await bx.fetchQuick(merchant)).map(o => ({ ...o, _state: normState(o.state) })).filter(o => (o.createTime || 0) >= cutoff);
+          orders = (await client.fetchQuick(merchant)).map(o => ({ ...o, _state: normState(o.state) })).filter(o => (o.createTime || 0) >= cutoff);
         } else orders = await fetchRecentOrders(merchant, 24, 3);
       } catch (e) {
-        console.error(`[worker] ${merchant.name}: order fetch failed —`, e.response?.data?.msg || e.bingx?.msg || e.message);
+        console.error(`[worker] ${merchant.name}: order fetch failed —`, e.response?.data?.msg || e.bingx?.msg || e.gate?.msg || e.message);
         continue; // one merchant failing must not stall the others
       }
 

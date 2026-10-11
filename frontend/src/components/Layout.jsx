@@ -10,11 +10,13 @@ const brandIcon = (src, alt) => function BrandIcon({ size = 18, className = '' }
 };
 const MexcIcon = brandIcon('/brand/mexc.png', 'MEXC');
 const BingxIcon = brandIcon('/brand/bingx.png', 'BingX');
+const GateIcon = brandIcon('/brand/gate.svg', 'Gate');
 import { subscribeQueue, getActionableCount } from '../actionQueue';
 
 const NAV = [
   { to: '/',         icon: MexcIcon,        label: 'Dashboard MEXC', short: 'MEXC' },
   { to: '/bingx',    icon: BingxIcon,       label: 'Dashboard BingX', short: 'BingX' },
+  { to: '/gate',     icon: GateIcon,        label: 'Dashboard Gate', short: 'Gate' },
   { to: '/queue',    icon: Zap,             label: 'Antrian',   short: 'Antrian', badge: true },
   { to: '/uu',       icon: Users,           label: 'Unique Users', short: 'UU'  },
   { to: '/ftd',      icon: UserPlus,        label: 'FTD',       short: 'FTD'    },

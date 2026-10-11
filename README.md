@@ -295,6 +295,73 @@ SELL yang baru berakhir (<2 jam) dan order yang sudah kirim dokumen tapi belum
 ada keputusan ikut dibaca (maks 15 chat per merchant per siklus, yang berjalan
 didahulukan).
 
+## v79 — Gate.io P2P (platform ketiga)
+
+Dokumentasi: `gate-api-v4-markdown/en/gate-api-v4.md` bagian "P2p" (APIv4
+v4.106.149). Merchant Gate ditambah lewat Settings → platform **Gate**
+(maks 3), dengan pasangan **fiat/kripto** (bawaan IDR/USDT) karena setiap
+daftar order Gate mewajibkan `crypto_currency` + `fiat_currency`.
+
+- **Dashboard Gate** (`/gate`) — kerangka yang sama persis dengan dashboard
+  MEXC (3 panel, filter tanggal + event Jumat→sekarang, switcher HP). Panelnya
+  `MerchantPanel` yang sama; order Gate ikut masuk **Antrian** berlabel Gate,
+  notifikasi (Telegram / push), auto-reply worker, dan Catatan Buyer.
+- Yang ada di panel Gate: saldo spot (`GET /spot/accounts`), Iklan baru,
+  ubah harga cepat, saklar merchant (= `set_merchant_work_hours`, status
+  kerja 1/0 — Gate tidak punya "freeze API" seperti MEXC), chat REST per
+  order (poll 3 detik), baris diagnostik rentang. Tidak ada: FTD (Gate tidak
+  mengirim statistik buyer di order), buat order (tidak ada endpoint taker).
+
+Cara kerja: `backend/utils/gateApi.js` (tanda tangan APIv4: header
+`KEY`/`Timestamp`/`SIGN`, HMAC-SHA512 atas
+`METHOD\n/api/v4/path\nquery\nSHA512(body)\nts`, diuji terhadap contoh
+resmi; semua endpoint P2P = POST JSON; gerbang ±4 req/detik per merchant),
+`gateAdapter.js` (penerjemah ke bentuk MEXC), `gateOrders.js`, `gateAds.js`,
+`gateChat.js`. Route `/api/...` tetap sama — pembelok `merchant.platform`.
+
+Perbedaan API Gate yang memengaruhi tampilan/aksi:
+- **Kosakata**: Gate `amount` = jumlah kripto, `total` = nominal fiat,
+  `rate` = harga; `txid` = nomor order. Sudah dibalik di adapter.
+- **Status** (teks) → status dashboard: `unpay`/`hide_payment`/`TEMP` → Belum
+  bayar; `paid`/`unconfirmed` → Sudah bayar; `finished`/`bclosed` → Selesai;
+  `cancel`/`sclosed`/`becancel` → Dibatalkan; `expired` → Timeout;
+  **`locked` → Banding** (asumsi: LOCKED = order dibekukan karena sengketa /
+  tinjauan; cek di akun live) — order dari tab `dispute` atau `in_appeal=1`
+  juga Banding. Status lain → "Status ?" dengan teks mentahnya.
+- **Order berjalan vs selesai** dibaca dari dua endpoint
+  (`get_pending_transaction_list` tab pending + dispute, dan
+  `get_completed_transaction_list` status `completed` dengan filter waktu
+  server, halaman 200). Rentang tanggal: maks 10 halaman (2.000 order).
+- **Unread chat** tidak ada di daftar; diambil dari detail (`im_unread`)
+  untuk maks 8 order berjalan per siklus (cache 10 detik) supaya lencana
+  pesan dan notifikasi "pesan masuk" tetap jalan.
+- **Nama KYC lawan** (`its_realname`) sudah ada di daftar — tidak perlu detail.
+- **Release** = `confirm-receipt` (order JUAL); **Konfirmasi bayar** =
+  `confirm-payment` (order BELI, `payment_method` = jenis bayar teks mis.
+  `bank`, diambil dari order, bukan id angka). Guard yang sama: tolak bila
+  selesai/batal/banding/sisi salah.
+- **Iklan**: satu endpoint untuk buat & edit (`place_biz_push_order`, `type`
+  0/1 buat jual/beli, 2/3 edit); ubah harga cepat = kirim ulang iklan dengan
+  harga baru (dibaca dulu dari `ads_detail`). Limit per order bisa **fiat**
+  (`limitBasis` 1, seperti MEXC) atau kripto; satuan limit iklan lama tidak
+  bisa diubah. Rekening: **satu per jenis** (`pay_type_json`). Status iklan:
+  1 tayang (OPEN), 3 turun (CLOSE), 4 **tutup permanen** (DELETE). Teks
+  ketentuan/auto-reply diperiksa risk control Gate (code 70305102).
+  Harga mengambang: `rateReferenceId` (1 platform / 2 Gate / 3 spot) ×
+  (1 ± `rateOffset`%); field `unitPrice` tetap wajib dikirim.
+- **Chat**: `get_chats_list` (pesan sistem/status ditampilkan sebagai baris
+  tengah), `send_chat_message` (maks 500 karakter; teks yang kena risk
+  control tetap `code 0` + `toast_msg` → tampil sebagai peringatan), gambar
+  JPEG/PNG/MP4 ≤ 20 MB via `upload_chat_file` (base64 → `file_key`).
+  Penentuan "pesan dari kita": `username` = `Self` atau = `user_name` akun
+  (dari `get_user_info`); verifikasi di akun live.
+- Verifikasi tambahan (OVER_VERIFY) khusus MEXC — tidak ada padanan di Gate.
+- Logo `frontend/public/brand/gate.svg` hanya placeholder — ganti dengan
+  logo resmi bila ada.
+
+Sebelum mengandalkan merchant Gate: Settings → **Tes koneksi** (info akun,
+iklan, order berjalan, rekening, saldo spot).
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 
