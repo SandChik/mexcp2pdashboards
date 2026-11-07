@@ -362,6 +362,24 @@ Perbedaan API Gate yang memengaruhi tampilan/aksi:
 Sebelum mengandalkan merchant Gate: Settings → **Tes koneksi** (info akun,
 iklan, order berjalan, rekening, saldo spot).
 
+## v80 — Catatan Buyer per merchant, antrean API, backup
+
+- **Alert "nama sama" sekarang per merchant.** Tiap merchant hanya
+  dibandingkan dengan order **miliknya sendiri + data impor/manual** — bukan
+  lagi seluruh merchant. Pembeli yang sudah pernah order di merchant A dianggap
+  pembeli baru di merchant B. Berlaku di panel, Antrian (indeks nama per
+  merchant), dan halaman Catatan Buyer (pilih satu merchant = order merchant
+  itu + impor; tanda "duplikat" di tampilan "Semua merchant" juga dihitung per
+  merchant). Data impor/manual tidak punya merchant, jadi ikut dihitung di
+  semua merchant — karena itu dialog impor tetap mengecek ke semua catatan.
+  `GET /api/registry/:mid` tanpa `all` = merchant itu + `manual`.
+- **Error harian MEXC "Timestamp … outside of the recvWindow"**: request
+  ditandatangani (timestamp dibuat) SEBELUM menunggu giliran di antrean rate
+  limit; saat antrean panjang, timestamp sudah basi >5 detik waktu dikirim.
+  Sekarang tunggu giliran dulu, baru tanda tangan — di MEXC, BingX, dan Gate.
+- **Backup harian** (`deploy/backup.sh`) — sebelumnya server tidak punya backup
+  sama sekali. Lihat `deploy/DEPLOY.md` → Backup.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

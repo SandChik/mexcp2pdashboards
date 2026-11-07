@@ -115,8 +115,8 @@ function envelope(r) {
 async function gateGet(path, params, apiKey, apiSecret, opts = {}) {
   const fullPath = PREFIX + path;
   const q = queryOf(params);
+  await gate(apiKey, !!opts.priority); // wait first, THEN timestamp + sign (see mexcApi, v80)
   const headers = { Accept: 'application/json', ...signHeaders('GET', fullPath, q, '', apiKey, apiSecret) };
-  await gate(apiKey, !!opts.priority);
   const r = await axios.get(`${BASE_URL}${fullPath}${q ? '?' + q : ''}`, { ...axiosOpts, headers });
   const env = envelope(r);
   if (Array.isArray(env)) return { code: 0, data: env };
@@ -128,11 +128,11 @@ async function gateGet(path, params, apiKey, apiSecret, opts = {}) {
 async function gatePost(path, body, apiKey, apiSecret, opts = {}) {
   const fullPath = PREFIX + path;
   const bodyString = JSON.stringify(clean(body));
+  await gate(apiKey, !!opts.priority); // wait first, THEN timestamp + sign (see mexcApi, v80)
   const headers = {
     Accept: 'application/json', 'Content-Type': 'application/json',
     ...signHeaders('POST', fullPath, '', bodyString, apiKey, apiSecret),
   };
-  await gate(apiKey, !!opts.priority);
   const r = await axios.post(`${BASE_URL}${fullPath}`, bodyString, { ...axiosOpts, headers });
   return envelope(r);
 }

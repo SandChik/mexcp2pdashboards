@@ -82,8 +82,9 @@ export default function ActionQueue() {
     return () => { cancelled = true; };
   }, [items, details]);
 
-  // Buyer-log name index — owned by the shared poller so it stays fresh on every
-  // page, not just while this one is open.
+  // Buyer-log name index PER MERCHANT ({ merchantId: { name: [orderNo] } }) —
+  // each order is checked against its own merchant's log + imports only (v80).
+  // Owned by the shared poller so it stays fresh on every page.
   const nameIdx = getNameIndex();
 
   useEffect(() => { if (cursor >= items.length) setCursor(Math.max(0, items.length - 1)); }, [items.length, cursor]);
@@ -103,7 +104,7 @@ export default function ActionQueue() {
       if (!isBuyerLogOn(o.merchantId)) return;
       const rn = details[o.advOrderNo]?.userInfo?.realName;
       if (!rn) return;
-      const times = (nameIdx[normName(rn)] || []).filter(n => n !== o.advOrderNo).length;
+      const times = (nameIdx[o.merchantId]?.[normName(rn)] || []).filter(n => n !== o.advOrderNo).length;
       if (times < 1 || dupSeen.current.has(o.advOrderNo)) return;
       dupSeen.current.add(o.advOrderNo);
       announceDuplicate({ merchantId: o.merchantId, advOrderNo: o.advOrderNo, realName: rn, times: times + 1 });
@@ -227,7 +228,7 @@ export default function ActionQueue() {
             const pay = d?.confirmPaymentInfo || d?.paymentInfo?.[0] || null;
             // Only when that merchant has "Catat buyer & alert nama" switched on.
             const priorCount = (realName && isBuyerLogOn(o.merchantId))
-              ? (nameIdx[normName(realName)] || []).filter(n => n !== o.advOrderNo).length
+              ? (nameIdx[o.merchantId]?.[normName(realName)] || []).filter(n => n !== o.advOrderNo).length
               : 0;
 
             return (

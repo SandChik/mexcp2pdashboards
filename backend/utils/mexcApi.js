@@ -43,18 +43,23 @@ async function drain() {
 
 // opts.priority — pass true for user-initiated calls only. Everything that
 // runs on a timer must stay low priority or the lane stops meaning anything.
+//
+// Sign AFTER the gate, never before (v80). The timestamp goes stale while the
+// request waits its turn: with three merchants polling, the low lane can hold
+// 40+ calls (≈5 s at 130 ms each) and MEXC's default recvWindow is 5 s — that
+// was the daily "Timestamp for this request is outside of the recvWindow".
 async function mexcGet(endpoint, params = {}, apiKey, apiSecret, opts = {}) {
+  await gate(!!opts.priority);
   const { queryString, signature } = buildSignedParams(params, apiSecret);
   const url = `${BASE_URL}${endpoint}?${queryString}&signature=${signature}`;
-  await gate(!!opts.priority);
   const response = await axios.get(url, { headers: { 'x-mexc-apikey': apiKey }, httpsAgent: agent });
   return response.data;
 }
 
 async function mexcPost(endpoint, params = {}, apiKey, apiSecret, opts = {}) {
+  await gate(!!opts.priority);
   const { queryString, signature } = buildSignedParams(params, apiSecret);
   const url = `${BASE_URL}${endpoint}?${queryString}&signature=${signature}`;
-  await gate(!!opts.priority);
   const response = await axios.post(url, null, {
     headers: { 'x-mexc-apikey': apiKey, 'Content-Type': 'application/json' },
     httpsAgent: agent,

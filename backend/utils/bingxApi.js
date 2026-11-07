@@ -100,15 +100,16 @@ const axiosOpts = {
  * Returns the parsed body `{ code, msg, timestamp, data }`.
  */
 async function bingxGet(path, params, apiKey, apiSecret, opts = {}) {
+  await gate(apiKey, !!opts.priority); // wait first, THEN timestamp + sign (see mexcApi, v80)
   const q = canon({ ...params, recvWindow: RECV_WINDOW, timestamp: Date.now() });
   const url = `${BASE_URL}${path}?${q}&signature=${sign(q, apiSecret)}`;
-  await gate(apiKey, !!opts.priority);
   const r = await axios.get(url, { ...axiosOpts, headers: { 'X-BX-APIKEY': apiKey } });
   return r.data;
 }
 
 /** POST. Parameter placement follows POST_MODE; the signature always covers all of them. */
 async function bingxPost(path, params, apiKey, apiSecret, opts = {}) {
+  await gate(apiKey, !!opts.priority); // wait first, THEN timestamp + sign (see mexcApi, v80)
   const ts = Date.now();
   const all = { ...clean(params), recvWindow: RECV_WINDOW, timestamp: ts };
   const c = canon(all);
@@ -128,7 +129,6 @@ async function bingxPost(path, params, apiKey, apiSecret, opts = {}) {
     url = `${BASE_URL}${path}?${c}&signature=${sig}`;
     body = null;
   }
-  await gate(apiKey, !!opts.priority);
   const r = await axios.post(url, body, { ...axiosOpts, headers });
   return r.data;
 }

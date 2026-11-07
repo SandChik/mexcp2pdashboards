@@ -168,12 +168,11 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
 
   // Permanent buyer-name index, source of the duplicate-KYC alert
   const loadNameIndex = useCallback(async () => {
-    // ACROSS ALL MERCHANTS (all=true). The same person ordering once via one
-    // merchant and again via another is exactly the abuse this alert exists to
-    // catch, so scoping the comparison to this merchant made it blind to the
-    // most important case — while the Catatan Buyer page, which defaults to
-    // "Semua merchant", flagged it.
-    try { const r = await registryApi.list(merchant.id, true); setLogNameIndex(r.data?.nameIndex || {}); }
+    // THIS merchant's own orders + manual/imported entries only (v80, by
+    // request): every merchant runs its own event, so a buyer who already
+    // traded with another merchant is still new here. Before v80 this was
+    // all=true (every merchant) — don't switch it back without asking.
+    try { const r = await registryApi.list(merchant.id); setLogNameIndex(r.data?.nameIndex || {}); }
     catch { /* keep last */ }
   }, [merchant.id]);
   useEffect(() => {

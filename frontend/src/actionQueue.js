@@ -32,7 +32,7 @@ let items = [];
 let actionableCount = 0;
 let activeByMerchant = {};
 let buyerLogOn = {};          // merchantId -> is the buyer-log/duplicate alert enabled
-let nameIndex = {};           // normalised KYC name -> [advOrderNo] (across all merchants)
+let nameIndex = {};           // merchantId -> { normalised KYC name -> [advOrderNo] } — own log + imports (v80)
 let nameIndexAt = 0;
 const prevStates = {};        // merchantId -> { advOrderNo: state }
 const prevUnread = {};        // merchantId -> { advOrderNo: unreadCount }
@@ -132,7 +132,8 @@ export function getActionableCount() { return actionableCount; }
  *  chip so you can see where the activity is without opening each panel. */
 export function getActiveByMerchant() { return activeByMerchant; }
 export function getQueueMeta() { return { lastError, lastSync, merchants, buyerLogOn, inFlight }; }
-/** Permanent buyer-name index, shared so the queue page doesn't fetch its own. */
+/** Permanent buyer-name index per merchant ({ merchantId: { name: [orderNo] } }),
+ *  shared so the queue page doesn't fetch its own. */
 export function getNameIndex() { return nameIndex; }
 /** Is the duplicate-name alert switched on for this merchant? */
 export function isBuyerLogOn(mid) { return !!buyerLogOn[mid]; }
@@ -172,12 +173,17 @@ export async function refreshQueue(opts = {}) {
     // The buyer log is written by the server worker, so this tab never hears
     // about new entries by itself. Refresh periodically or a buyer whose first
     // order completed after page load would never raise the alert.
+    // One index per merchant with the alert on: its own orders + imports only
+    // (v80) — a buyer of merchant A is not a repeat buyer for merchant B.
     if (Object.values(buyerLogOn).some(Boolean) && Date.now() - nameIndexAt > 45000) {
-      try {
-        const r = await registryApi.list(merchants[0].id, true);
-        nameIndex = r.data?.nameIndex || nameIndex;
-        nameIndexAt = Date.now();
-      } catch { /* keep last */ }
+      const next = {};
+      let ok = true;
+      await Promise.all(merchants.filter(m => buyerLogOn[m.id]).map(async m => {
+        try { const r = await registryApi.list(m.id); next[m.id] = r.data?.nameIndex || {}; }
+        catch { ok = false; next[m.id] = nameIndex[m.id] || {}; /* keep last */ }
+      }));
+      nameIndex = next;
+      if (ok) nameIndexAt = Date.now();
     }
     const now = Date.now();
     const results = await Promise.all(merchants.map(async (m) => {

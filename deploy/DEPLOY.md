@@ -105,10 +105,14 @@ push — Actions men-deploy versi lama.
   `/etc/systemd/system/mexc-dashboard.service` → `systemctl daemon-reload && systemctl restart mexc-dashboard`
 - **Backup (wajib dua-duanya):** `/opt/mexc-dashboard/backend/data/` DAN
   `/home/mexc/.mexc-dashboard/` (kunci enkripsi — tanpa ini backup data tak
-  bisa dibaca). Cron harian:
+  bisa dibaca). Sejak v80 pakai `deploy/backup.sh` (cara pasang ada di kepala
+  skrip): tiap hari 03:00 waktu server → `/var/backups/mexc-dashboard/`
+  (hanya root), simpan 14 hari. Ini melindungi dari deploy rusak / file JSON
+  korup / terhapus, **bukan** dari VPS hilang. Salinan ke luar VPS, dari laptop:
   ```
-  0 3 * * * tar czf /root/mexc-backup-$(date +\%F).tar.gz /opt/mexc-dashboard/backend/data /home/mexc/.mexc-dashboard
+  ssh ubuntu@IP_VPS 'sudo cat /var/backups/mexc-dashboard/mexc-backup-YYYY-MM-DD.tar.gz' > mexc-backup.tar.gz
   ```
+  Simpan arsip itu baik-baik — isinya API secret terenkripsi BESERTA kuncinya.
 
 ## Troubleshooting
 

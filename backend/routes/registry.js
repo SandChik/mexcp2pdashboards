@@ -57,14 +57,21 @@ router.delete('/manual/batch/:batchId', authMiddleware, async (req, res) => {
   res.json({ success: true, removed });
 });
 
-// GET /api/registry/:mid — records for one merchant (or ?all=true for every
-// merchant) + duplicate-name index. Duplicates are computed on normalized
-// realName; entries without a realName can't participate in matching.
+// GET /api/registry/:mid — the records that merchant's duplicate-name alert
+// compares against: ITS OWN captured orders + every manual/imported entry
+// (v80). Other merchants' orders are deliberately left out — a buyer who
+// already traded with merchant A is a NEW buyer for merchant B. Imported
+// entries carry no merchant, so they count for every merchant.
+// ?all=true still returns everything (Catatan Buyer page "Semua merchant",
+// and the import dialog, whose rows land in every merchant's scope).
+// Duplicates are computed on normalized realName; entries without a realName
+// can't participate in matching.
 router.get('/:mid', authMiddleware, (req, res) => {
   const log = readJson(LOG_PATH);
   const all = req.query.all === 'true';
+  const mid = req.params.mid;
   const records = Object.entries(log)
-    .filter(([, r]) => all || r.merchantId === req.params.mid)
+    .filter(([, r]) => all || r.merchantId === mid || r.merchantId === MANUAL_MERCHANT_ID)
     .map(([advOrderNo, r]) => ({ advOrderNo, ...r }))
     .sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
 

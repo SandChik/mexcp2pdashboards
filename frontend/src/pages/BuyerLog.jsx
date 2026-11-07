@@ -31,13 +31,15 @@ export default function BuyerLog() {
     if (merchants.length === 0) return;
     setLoading(true);
     try {
-      // Registry entries are stored per merchant; ?all=true returns everything
-      // regardless of the :mid in the path, so any merchant id works as anchor.
-      const anchor = merchantSel === 'all' ? merchants[0].id : merchantSel;
-      const r = await registryApi.list(anchor, merchantSel === 'all');
-      let recs = r.data?.records || [];
-      if (merchantSel !== 'all') recs = recs.filter(x => x.merchantId === merchantSel);
-      setRecords(recs);
+      // One merchant → its own orders + every manual/imported entry: exactly
+      // what that merchant's "nama sama" alert compares against (v80).
+      // "Semua" and "Manual / Impor" load everything (?all=true — any merchant
+      // id works as anchor): imports belong to every merchant's scope, so
+      // whether an imported name is a duplicate depends on all merchants.
+      const one = merchantSel !== 'all' && merchantSel !== MANUAL_ID;
+      const anchor = one ? merchantSel : merchants[0].id;
+      const r = await registryApi.list(anchor, !one);
+      setRecords(r.data?.records || []);
     } catch (e) { toast.error('Gagal memuat catatan: ' + (e.response?.data?.error || e.message)); }
     finally { setLoading(false); }
   }
@@ -45,11 +47,32 @@ export default function BuyerLog() {
 
   const merchantName = (id) => id === MANUAL_ID ? 'Manual / Impor' : (merchants.find(m => m.id === id)?.name || id);
 
-  const { rows, dupNames, uniqueNames } = useMemo(() => {
-    const counts = {};
-    records.forEach(r => { if (r.realName) { const k = normName(r.realName); counts[k] = (counts[k] || 0) + 1; } });
-    const dups = new Set(Object.keys(counts).filter(k => counts[k] >= 2));
-    let list = records.map(r => ({ ...r, _dup: r.realName ? dups.has(normName(r.realName)) : false, _dupCount: r.realName ? counts[normName(r.realName)] : 0 }));
+  const { rows, shown, dupNames, uniqueNames } = useMemo(() => {
+    // Duplicate = the same name twice inside ONE merchant's scope (its own
+    // orders + manual/imported entries) — the same comparison the panel and
+    // Antrian alert make since v80. A buyer seen once at merchant A and once at
+    // merchant B is NOT a duplicate.
+    const own = {};   // merchantId -> normName -> count (captured orders)
+    const imp = {};   // normName -> count (manual / imported: in every scope)
+    records.forEach(r => {
+      if (!r.realName) return;
+      const k = normName(r.realName);
+      if (r.merchantId === MANUAL_ID) imp[k] = (imp[k] || 0) + 1;
+      else { const o = own[r.merchantId] || (own[r.merchantId] = {}); o[k] = (o[k] || 0) + 1; }
+    });
+    const scopeCount = (r, k) => r.merchantId === MANUAL_ID
+      ? (imp[k] || 0) + Math.max(0, ...Object.values(own).map(o => o[k] || 0))
+      : (own[r.merchantId]?.[k] || 0) + (imp[k] || 0);
+    const base = merchantSel === MANUAL_ID ? records.filter(r => r.merchantId === MANUAL_ID) : records;
+    const names = new Set(), dups = new Set();
+    let list = base.map(r => {
+      if (!r.realName) return { ...r, _dup: false, _dupCount: 0 };
+      const k = normName(r.realName);
+      const n = scopeCount(r, k);
+      names.add(k);
+      if (n >= 2) dups.add(k);
+      return { ...r, _dup: n >= 2, _dupCount: n };
+    });
     const query = q.trim().toLowerCase();
     if (query) list = list.filter(r =>
       (r.realName || '').toLowerCase().includes(query) ||
@@ -57,8 +80,8 @@ export default function BuyerLog() {
       (r.bank || '').toLowerCase().includes(query) ||
       (r.advOrderNo || '').toLowerCase().includes(query));
     if (dupOnly) list = list.filter(r => r._dup);
-    return { rows: list, dupNames: dups.size, uniqueNames: Object.keys(counts).length };
-  }, [records, q, dupOnly]);
+    return { rows: list, shown: base.length, dupNames: dups.size, uniqueNames: names.size };
+  }, [records, merchantSel, q, dupOnly]);
 
   // Recent manual/import batches, derived from the loaded records — lets one bad
   // import be undone in a single click instead of deleting rows one by one.
@@ -155,10 +178,14 @@ export default function BuyerLog() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Total catatan</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{records.length}</p></div>
+            <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Total catatan</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{shown}</p></div>
             <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Nama unik</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{uniqueNames}</p></div>
             <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Nama duplikat</p><p className={`text-2xl font-mono font-semibold mt-1 ${dupNames ? 'text-sell' : 'text-surface-50'}`}>{dupNames}</p></div>
           </div>
+
+          <p className="text-xs text-surface-300 -mt-1">
+            "Nama sama" dihitung per merchant: order merchant itu sendiri + data impor/manual. Pembeli yang sudah pernah order di merchant lain tidak dianggap duplikat.
+          </p>
 
           {batches.length > 0 && (
             <div className={card + ' p-4'}>
@@ -227,7 +254,7 @@ export default function BuyerLog() {
             </div>
             {rows.length === 0 && (
               <p className="text-center py-12 text-surface-300 text-sm">
-                {records.length === 0
+                {shown === 0
                   ? 'Belum ada catatan. Nyalakan "Catat buyer & alert nama" di menu ⋮ panel merchant — order yang selesai akan otomatis tercatat di sini. Data lama bisa dimasukkan lewat tombol "Tambah / Impor".'
                   : 'Tidak ada hasil untuk filter ini.'}
               </p>
