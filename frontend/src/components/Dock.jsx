@@ -138,8 +138,11 @@ function MobileDock({ pending }) {
           return (
             <NavLink key={item.to} to={item.to} end={item.to === '/'} aria-label={item.label}
               onClick={() => setTapIdx(i)}
-              className="group relative z-10 flex-1 min-w-0 flex flex-col items-center gap-1 pt-1.5 pb-1">
-              <span className={`relative w-8 h-8 transition-transform duration-300 group-active:scale-90 ${on ? 'dock-pop' : ''}`}>
+              className="relative z-10 flex-1 min-w-0 flex flex-col items-center gap-1 pt-1.5 pb-1">
+              {/* v85: the icon itself never moves or scales. The old press-shrink
+                  plus a bouncy "pop" changed direction 2–3 times per tap and read
+                  as a shiver; the sliding highlight is the whole effect now. */}
+              <span className="relative w-8 h-8">
                 {/* Only the icon dims when inactive — the badge stays loud */}
                 <span className={`block w-full h-full transition-opacity duration-200 ${on ? '' : 'opacity-55'}`}>
                   <Tile item={item} />

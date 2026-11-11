@@ -438,6 +438,27 @@ dashboard BingX. Tiga sebab, tiga perbaikan:
   di luar cache 3 detik — panggilan ekstra di gerbang BingX (~2/detik per
   akun). Sekarang lewat `quickOrders` (cache bersama, sama dengan notifier).
 
+## v85 — dock HP: tidak naik sendiri, tidak bergetar
+
+- **Dock kadang naik ±59 px di aplikasi Home Screen iPhone.** Ini bug iOS
+  (WebKit, iOS 17 → 26, khusus web app standalone): setelah keyboard menutup
+  atau aplikasi kembali dari background, viewport kadang tertinggal lebih pendek
+  setinggi status bar. `innerHeight`, `100dvh`, dan semua elemen `fixed; bottom`
+  ikut naik di atas pita hitam sampai aplikasi di-force-quit.
+  `frontend/src/viewportGuard.js` mendeteksi tinggi yang lebih pendek dari yang
+  pernah dimiliki layar ini, lalu menyembunyikan dan menampilkan lagi `#root`
+  dalam satu langkah sinkron (tidak ada frame yang tergambar, posisi scroll
+  dikembalikan) sehingga WebKit mengukur ulang. Hanya berjalan di aplikasi
+  Home Screen iOS, tidak pernah saat sedang mengetik, dan maksimal 3 percobaan
+  per ukuran yang nyangkut.
+- **Ikon bergetar saat diketuk.** Ikon aktif dulu memakai animasi "pop"
+  bertahap (0,92 → 1,19 → 1,1) ditambah efek mengecil saat ditekan, dan
+  sorotannya meluncur 4–8 px melewati target lalu kembali. Sekarang ikon diam
+  (hanya menyala), sorotan meluncur dengan ease-out tanpa memantul, dan flash
+  abu-abu iOS serta pratinjau tekan-lama pada dock dimatikan. Diukur di HP
+  emulasi dengan CPU ×4: berbalik arah 0 kali (dulu 1 kali untuk sorotan dan
+  2–3 kali untuk ikon per ketukan).
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

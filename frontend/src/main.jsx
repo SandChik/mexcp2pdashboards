@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 import { resumePush } from './push';
+import { installViewportGuard } from './viewportGuard';
 
 // Keep the push service worker registered on devices that opted in.
 resumePush();
@@ -12,3 +13,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>
 );
+
+// iOS Home-Screen app: undo the "viewport stuck ~59 px short" bug (dock floating high).
+installViewportGuard();

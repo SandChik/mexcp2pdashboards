@@ -106,8 +106,8 @@
   }
   .dock-item:hover .dock-tip, .dock-item:focus-visible .dock-tip { opacity: 1; }
 
-  /* Phone: glass highlight that slides (with a little overshoot) to the
-     active item, and the active icon pops up. */
+  /* Phone: glass highlight that slides to the active item; the active icon
+     and label brighten in place. */
   /* Phone: no backdrop blur — re-blurring a page that is being rebuilt behind
      the dock every frame is what makes mobile GPUs drop frames. Near-opaque
      instead; on this dark UI it looks the same. */
@@ -120,17 +120,19 @@
     position: absolute; top: 0; bottom: 0; left: 0; border-radius: 16px;
     background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.07), 0 8px 18px -10px rgba(77,116,255,0.7);
-    transition: transform .42s cubic-bezier(.3,1.3,.45,1);
+    /* v85: plain ease-out, no overshoot — the old springy curve ran 4–8 px
+       past the target and came back, which looked like a wobble. */
+    transition: transform .34s cubic-bezier(.25,1,.5,1);
   }
-  .dock-pop { transform: translateY(-2px) scale(1.1); animation: dockPop .4s cubic-bezier(.3,1.4,.5,1); will-change: transform; }
-  @keyframes dockPop {
-    0%   { transform: translateY(0) scale(.92); }
-    55%  { transform: translateY(-4px) scale(1.18); }
-    100% { transform: translateY(-2px) scale(1.1); }
+  /* No grey iOS tap flash, no long-press link preview, no text selection on
+     the dock — each of those flickers on top of the sliding highlight. */
+  .dock a, .dock button {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none; user-select: none;
   }
   @media (prefers-reduced-motion: reduce) {
     .dock-pill, .dock-slot, .dock-lift { transition: none; }
-    .dock-pop { animation: none; }
   }
 
   .seg { @apply flex items-center gap-0.5 bg-surface-900 border border-surface-700 rounded-lg p-0.5; }
