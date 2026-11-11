@@ -405,6 +405,14 @@ iklan, order berjalan, rekening, saldo spot).
   (rentang · auto · refresh), pemilih merchant berbentuk segmen; "+ Merchant"
   hanya di desktop. Catatan Buyer di HP juga dirapikan.
 
+v82 — dock diperbaiki. Desktop: pembesaran mengikuti jarak kursor seperti
+macOS; yang membesar adalah LEBAR slot, jadi ikon tetangga terdorong (tidak
+lagi bertabrakan), jarak antar-ikon ditambah. HP: sorotan kaca yang meluncur
+ke menu aktif, ikon aktif "pop" dan terangkat, ikon lain diredupkan (lencana
+Antrian tetap terang), efek tekan. Dock kini dipasang sekali di `App.jsx`
+(`components/Dock.jsx`), bukan di tiap halaman, sehingga tidak dibuat ulang
+saat pindah menu.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

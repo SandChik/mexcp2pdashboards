@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
@@ -11,6 +11,7 @@ import ActionQueue from './pages/ActionQueue';
 import BingxDashboard from './pages/BingxDashboard';
 import GateDashboard from './pages/GateDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
+import Dock from './components/Dock';
 
 function ProtectedRoute({ children }) {
   const { isAuth } = useAuth();
@@ -19,6 +20,7 @@ function ProtectedRoute({ children }) {
 
 function AppRoutes() {
   const { isAuth } = useAuth();
+  const { pathname } = useLocation();
   return (
     <ErrorBoundary>
     <Routes>
@@ -33,6 +35,8 @@ function AppRoutes() {
       <Route path="/gate" element={<ProtectedRoute><GateDashboard /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    {/* One dock for every page — mounted here so it persists across navigation */}
+    {isAuth && pathname !== '/login' && <Dock />}
     </ErrorBoundary>
   );
 }
