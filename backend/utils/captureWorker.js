@@ -46,9 +46,10 @@ async function cycle() {
       let orders;
       try {
         if (isBingx) {
-          const client = merchant.platform === 'gate' ? require('./gateOrders') : require('./bingxOrders');
+          // v84: the shared 3s-cached quick list (see autoReplyWorker) instead of
+          // a direct fetchQuick — no extra calls in BingX's per-account gate.
           const cutoff = Date.now() - 24 * 3600000;
-          orders = (await client.fetchQuick(merchant)).map(o => ({ ...o, _state: normState(o.state) })).filter(o => (o.createTime || 0) >= cutoff);
+          orders = (await require('../routes/orders').quickOrders(merchant)).map(o => ({ ...o, _state: normState(o.state) })).filter(o => (o.createTime || 0) >= cutoff);
         } else orders = await fetchRecentOrders(merchant, 24, 3);
       } catch (e) {
         console.error(`[worker] ${merchant.name}: order fetch failed —`, e.response?.data?.msg || e.bingx?.msg || e.gate?.msg || e.message);

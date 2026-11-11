@@ -420,6 +420,24 @@ dirender sebagai React transition (`BrowserRouter future.v7_startTransition`)
 supaya halaman berat dibangun bertahap, dan dock HP tanpa backdrop blur (mahal
 di GPU HP) dengan sorotan di layer komposit sendiri.
 
+## v84 — Antrian secepat dashboard BingX
+
+Order BingX dulu tampil di Antrian beberapa detik lebih lambat daripada di
+dashboard BingX. Tiga sebab, tiga perbaikan:
+- **Antrian menunggu merchant paling lambat.** Semua merchant diambil dengan
+  satu `Promise.all` dan daftar baru digambar setelah SEMUA menjawab (Gate = 3
+  panggilan + cek unread, MEXC berbagi gerbang dengan worker). Sekarang tiap
+  merchant punya jam poll sendiri (`actionQueue.js` → `pollMerchant`) dan
+  barisnya tampil begitu datanya sendiri tiba. Uji lokal dengan satu merchant
+  diperlambat 4 detik: merchant lain tampil dalam <1 detik (dulu 4,3 detik).
+- **Detail order (nama/rekening) dalam batch 3 campur semua merchant**, dan
+  batch yang sedang berjalan dibatalkan + dibuang setiap kali detail lain tiba.
+  Sekarang antrean per merchant paralel (maks 2 per merchant, baris yang perlu
+  aksi duluan), tiap detail tampil saat tiba, tidak ada yang dibuang.
+- **Worker catat buyer & auto-reply** mengambil daftar BingX/Gate langsung,
+  di luar cache 3 detik — panggilan ekstra di gerbang BingX (~2/detik per
+  akun). Sekarang lewat `quickOrders` (cache bersama, sama dengan notifier).
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

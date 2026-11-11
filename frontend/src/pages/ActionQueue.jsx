@@ -39,11 +39,17 @@ export default function ActionQueue() {
   const rowsRef = useRef([]);
   const dupSeen = useRef(new Set());
   const fetchingRef = useRef(new Set());
+  const lanesRef = useRef({});     // merchantId -> orders waiting for their detail
+  const workersRef = useRef({});   // merchantId -> detail fetches running (max 2)
+  const mountedRef = useRef(true);
+  const liveRef = useRef(new Set()); // advOrderNo of rows currently in the queue
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   useEffect(() => subscribeQueue(() => tick(t => t + 1)), []);
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
 
   const items = getQueue();          // every RUNNING order, action-first order
+  liveRef.current = new Set(items.map(o => o.advOrderNo));
   const meta = getQueueMeta();
   const nActionable = getActionableCount();
   // Index of the first row that needs no action — used to draw one divider
@@ -59,27 +65,40 @@ export default function ActionQueue() {
     // which is the latest possible moment to find out.
     const missing = items.filter(o => !details[o.advOrderNo] && !fetchingRef.current.has(o.advOrderNo));
     if (missing.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      for (let i = 0; i < missing.length; i += 3) {        // small batches — the
-        const batch = missing.slice(i, i + 3);             // backend rate-limits
-        batch.forEach(o => fetchingRef.current.add(o.advOrderNo));
-        const got = await Promise.all(batch.map(async o => {
+    // v84: one lane PER MERCHANT, all lanes in parallel. Each exchange has its
+    // own rate gate on the server (BingX per account, ~2/s), so the old mixed
+    // batches of three made a BingX detail wait for MEXC/Gate ones it never
+    // competed with. Inside a lane: rows you can act on first, 2 at a time,
+    // each detail shown the moment it arrives.
+    // The lanes live in refs, NOT in this effect: every arriving detail
+    // re-runs the effect, and the old version cancelled (and threw away) the
+    // batch in flight each time — so details trickled in far slower than the
+    // exchange answered.
+    missing.forEach(o => {
+      fetchingRef.current.add(o.advOrderNo);
+      (lanesRef.current[o.merchantId] = lanesRef.current[o.merchantId] || []).push(o);
+    });
+    for (const [mid, lane] of Object.entries(lanesRef.current)) {
+      lane.sort((a, b) => (actionFor(a) ? 0 : 1) - (actionFor(b) ? 0 : 1));
+      while ((workersRef.current[mid] || 0) < 2 && lane.length) {
+        workersRef.current[mid] = (workersRef.current[mid] || 0) + 1;
+        (async () => {
           try {
-            const r = await ordersApi.detail(o.merchantId, o.advOrderNo);
-            return [o.advOrderNo, r.data?.data || r.data || null];
-          } catch { return [o.advOrderNo, null]; }
-          finally { fetchingRef.current.delete(o.advOrderNo); }
-        }));
-        if (cancelled) return;
-        setDetails(prev => {
-          const next = { ...prev };
-          got.forEach(([no, d]) => { if (d) next[no] = d; });
-          return next;
-        });
+            for (let o = lane.shift(); o; o = lane.shift()) {
+              if (!mountedRef.current) return;
+              if (!liveRef.current.has(o.advOrderNo)) { fetchingRef.current.delete(o.advOrderNo); continue; } // left the queue meanwhile
+              let d = null;
+              try {
+                const r = await ordersApi.detail(o.merchantId, o.advOrderNo);
+                d = r.data?.data || r.data || null;
+              } catch { /* retried on a later render */ }
+              finally { fetchingRef.current.delete(o.advOrderNo); }
+              if (d && mountedRef.current) setDetails(prev => ({ ...prev, [o.advOrderNo]: d }));
+            }
+          } finally { workersRef.current[mid] -= 1; }
+        })();
       }
-    })();
-    return () => { cancelled = true; };
+    }
   }, [items, details]);
 
   // Buyer-log name index PER MERCHANT ({ merchantId: { name: [orderNo] } }) —

@@ -42,9 +42,7 @@ let merchantsAt = 0;           // when the merchant list was last fetched
 const MERCHANTS_TTL_MS = 60000; // re-read it every minute — a merchant added in Settings must show up
 let listeners = [];
 let timer = null;
-let inFlight = false;
-let inFlightSince = 0;
-let rerun = false;            // a refresh was requested while one was running → run again right after
+let inFlight = false;          // any merchant poll running (spinner)
 let forceNext = false;        // next pass bypasses the server's 3s cache (manual refresh)
 const STUCK_MS = 30000;       // a pass older than this is presumed hung (network) and abandoned
 let lastError = false;
@@ -140,112 +138,143 @@ export function isBuyerLogOn(mid) { return !!buyerLogOn[mid]; }
 
 /** Settings calls this after adding/editing/removing a merchant, so the next
  *  poll picks the change up immediately instead of on the minute. */
-export function invalidateQueueMerchants() { merchantsAt = 0; }
+export function invalidateQueueMerchants() { merchantsAt = 0; loadMerchants().catch(() => {}); }
 
-export async function refreshQueue(opts = {}) {
-  const force = !!(opts && opts.force);
-  if (force) forceNext = true;
-  if (inFlight) {
-    // Coalesce: one more pass after the current one. A pass that has been
-    // "running" for half a minute is a hung request — abandon it, or the
-    // queue would be frozen until the browser gave up on the socket.
-    if (Date.now() - inFlightSince < STUCK_MS) { rerun = true; emit(); return; }
-  }
-  inFlight = true; inFlightSince = Date.now();
-  const fresh = forceNext; forceNext = false;
-  emit(); // spinner on
-  try {
-    // The list used to be fetched ONCE per tab. A BingX merchant added in
-    // Settings therefore never got polled until a full page reload — its
-    // orders showed in the panel but never in the queue.
-    if (merchants.length === 0 || Date.now() - merchantsAt > MERCHANTS_TTL_MS) {
+// ── Poll: every merchant on its own clock (v84) ──────────────────────────
+// The queue used to fetch all merchants with one Promise.all and only redraw
+// when the SLOWEST had answered. Gate's quick list is 3 calls + unread
+// lookups, MEXC shares a global rate gate with the server workers — so a BingX
+// order that had already arrived sat invisible for seconds, while the BingX
+// dashboard (which waits for nobody) showed it at once. Now each merchant's
+// rows are applied the moment ITS fetch returns, and a slow merchant only
+// delays its own next poll.
+const mInFlight = {};   // merchantId -> started at
+const mRerun = {};      // merchantId -> 'fresh' | true  (asked again while running)
+const mFailed = {};     // merchantId -> last poll failed
+let merchantsPromise = null;
+let nameIndexPromise = null;
+
+function loadMerchants() {
+  if (!merchantsPromise) {
+    merchantsPromise = (async () => {
+      // The list used to be fetched ONCE per tab. A BingX merchant added in
+      // Settings therefore never got polled until a full page reload — its
+      // orders showed in the panel but never in the queue.
       const r = await merchantApi.list();
       merchants = r.data || [];
       merchantsAt = Date.now();
+      const ids = new Set(merchants.map(m => m.id));
+      const before = items.length;
+      items = items.filter(o => ids.has(o.merchantId));           // a removed merchant's rows go too
+      if (items.length !== before) actionableCount = items.filter(o => actionFor(o)).length;
       // Which merchants have "Catat buyer & alert nama" ON. The duplicate badge
       // and its sound are gated on this, per merchant.
       await Promise.all(merchants.map(async m => {
         try { const s = await merchantApi.getSettings(m.id); buyerLogOn[m.id] = !!s.data?.buyerLog; }
         catch { /* leave as-is; a settings blip must not silence the queue */ }
       }));
-    }
-
-    // The buyer log is written by the server worker, so this tab never hears
-    // about new entries by itself. Refresh periodically or a buyer whose first
-    // order completed after page load would never raise the alert.
-    // One index per merchant with the alert on, built from the sources chosen
-    // for it in Settings → Catatan Buyer (server-side; default = itself + imports).
-    if (Object.values(buyerLogOn).some(Boolean) && Date.now() - nameIndexAt > 45000) {
-      const next = {};
-      let ok = true;
-      await Promise.all(merchants.filter(m => buyerLogOn[m.id]).map(async m => {
-        try { const r = await registryApi.list(m.id); next[m.id] = r.data?.nameIndex || {}; }
-        catch { ok = false; next[m.id] = nameIndex[m.id] || {}; /* keep last */ }
-      }));
-      nameIndex = next;
-      if (ok) nameIndexAt = Date.now();
-    }
-    const now = Date.now();
-    const results = await Promise.all(merchants.map(async (m) => {
-      try {
-        // Quick path: shares the server-side 3s cache with the panels' own
-        // polling, so this poller usually costs ZERO extra MEXC requests.
-        // Actionable orders have minute-scale deadlines — the 24h quick
-        // window always contains them.
-        const r = await ordersApi.marketQuick(m.id, { startTime: now - WINDOW_MS, endTime: now, ...(fresh ? { fresh: 1 } : {}) }, { timeout: 20000 });
-        const raw = r.data;
-        const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-        const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name, platform: m.platform || o.platform || 'mexc' }));
-        // Announce over every order in the window, not just the running ones —
-        // otherwise a transition INTO done/cancelled/timeout would be silent,
-        // because those orders leave the running list at the same moment.
-        const seeded = seededMerchants.has(m.id);
-        announcing = true;
-        const { states, unread } = announceOrderChanges({
-          merchantId: m.id,
-          merchantName: m.name,
-          orders: norm,
-          prevStates: prevStates[m.id] || {},
-          prevUnread: prevUnread[m.id] || {},
-          first: !seeded,
-        });
-        prevStates[m.id] = states; prevUnread[m.id] = unread;
-        seededMerchants.add(m.id);
-        announcing = false;
-
-        noteTerminal(norm);
-        const running = reconcile(norm.filter(o => RUNNING.includes(o._state)));
-        return {
-          mid: m.id,
-          running,
-          actionable: running.filter(o => actionFor(o)).length,
-          active: running.length,
-        };
-      } catch { return null; } // one merchant failing must not blank the queue
-    }));
-
-    if (results.every(r => r === null)) { lastError = true; emit(); return; }
-    lastError = results.some(r => r === null);
-
-    const nextActive = { ...activeByMerchant };
-    results.forEach(r => { if (r) nextActive[r.mid] = r.active; });
-    activeByMerchant = nextActive;
-
-    const ok = results.filter(Boolean);
-    const okIds = new Set(ok.map(r => r.mid));
-    // Merchants whose fetch failed this cycle keep their previous rows.
-    const carried = items.filter(o => !okIds.has(o.merchantId));
-    // Actionable first, then soonest deadline, then newest (sortItems).
-    items = sortItems(carried.concat(ok.flatMap(r => r.running)));
-    actionableCount = items.filter(o => actionFor(o)).length;
-    lastSync = Date.now();
-    emit();
-  } finally {
-    inFlight = false;
-    announcing = false;
-    emit(); // spinner off
-    if (rerun) { rerun = false; refreshQueue(); }
+    })().finally(() => { merchantsPromise = null; });
   }
+  return merchantsPromise;
+}
+
+// The buyer log is written by the server worker, so this tab never hears
+// about new entries by itself. Refresh periodically or a buyer whose first
+// order completed after page load would never raise the alert.
+// One index per merchant with the alert on, built from the sources chosen
+// for it in Settings → Catatan Buyer (server-side; default = itself + imports).
+function refreshNameIndex() {
+  if (nameIndexPromise || !Object.values(buyerLogOn).some(Boolean) || Date.now() - nameIndexAt <= 45000) return;
+  nameIndexPromise = (async () => {
+    const next = {};
+    let ok = true;
+    await Promise.all(merchants.filter(m => buyerLogOn[m.id]).map(async m => {
+      try { const r = await registryApi.list(m.id); next[m.id] = r.data?.nameIndex || {}; }
+      catch { ok = false; next[m.id] = nameIndex[m.id] || {}; /* keep last */ }
+    }));
+    nameIndex = next;
+    if (ok) nameIndexAt = Date.now();
+    emit();
+  })().finally(() => { nameIndexPromise = null; });
+}
+
+function syncFlags() {
+  inFlight = Object.keys(mInFlight).length > 0;
+  lastError = merchants.some(m => mFailed[m.id]);
+}
+
+/** Replace ONE merchant's rows with a fresh snapshot and redraw now. */
+function applyMerchant(mid, running) {
+  items = sortItems(items.filter(o => o.merchantId !== mid).concat(running));
+  actionableCount = items.filter(o => actionFor(o)).length;
+  activeByMerchant = { ...activeByMerchant, [mid]: running.length };
+  lastSync = Date.now();
+}
+
+async function pollMerchant(m, fresh) {
+  const since = mInFlight[m.id];
+  if (since && Date.now() - since < STUCK_MS) {
+    // Coalesce: one more poll of THIS merchant after the current one. A poll
+    // older than STUCK_MS is a hung request — abandon it and start over.
+    mRerun[m.id] = fresh || mRerun[m.id] === 'fresh' ? 'fresh' : true;
+    return;
+  }
+  const token = Date.now();
+  mInFlight[m.id] = token;
+  syncFlags(); emit(); // spinner on
+  try {
+    // Quick path: shares the server-side 3s cache with the panels' own
+    // polling, so this poller usually costs ZERO extra exchange requests.
+    // Actionable orders have minute-scale deadlines — the 24h quick window
+    // always contains them.
+    const now = Date.now();
+    const r = await ordersApi.marketQuick(m.id, { startTime: now - WINDOW_MS, endTime: now, ...(fresh ? { fresh: 1 } : {}) }, { timeout: 20000 });
+    if (mInFlight[m.id] !== token) return; // abandoned as stuck; a newer poll owns this merchant
+    const raw = r.data;
+    const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+    const norm = list.map(o => ({ ...o, _state: normalizeState(o.state), merchantId: m.id, merchantName: m.name, platform: m.platform || o.platform || 'mexc' }));
+    // Announce over every order in the window, not just the running ones —
+    // otherwise a transition INTO done/cancelled/timeout would be silent,
+    // because those orders leave the running list at the same moment.
+    announcing = true;
+    try {
+      const { states, unread } = announceOrderChanges({
+        merchantId: m.id,
+        merchantName: m.name,
+        orders: norm,
+        prevStates: prevStates[m.id] || {},
+        prevUnread: prevUnread[m.id] || {},
+        first: !seededMerchants.has(m.id),
+      });
+      prevStates[m.id] = states; prevUnread[m.id] = unread;
+    } finally { announcing = false; }
+    seededMerchants.add(m.id);
+
+    noteTerminal(norm);
+    applyMerchant(m.id, reconcile(norm.filter(o => RUNNING.includes(o._state))));
+    mFailed[m.id] = false;
+  } catch {
+    if (mInFlight[m.id] === token) mFailed[m.id] = true; // one merchant failing keeps its previous rows and blanks nothing
+  } finally {
+    if (mInFlight[m.id] === token) delete mInFlight[m.id];
+    syncFlags(); emit();
+    if (mRerun[m.id] && !mInFlight[m.id]) {
+      const again = mRerun[m.id] === 'fresh';
+      delete mRerun[m.id];
+      pollMerchant(m, again);
+    }
+  }
+}
+
+export async function refreshQueue(opts = {}) {
+  if (opts && opts.force) forceNext = true;
+  const fresh = forceNext; forceNext = false;
+  try {
+    if (merchants.length === 0) await loadMerchants();                       // first run: need the list
+    else if (Date.now() - merchantsAt > MERCHANTS_TTL_MS) loadMerchants().catch(() => {}); // later: refresh in the background
+  } catch { lastError = true; emit(); return; }
+  refreshNameIndex();
+  await Promise.all(merchants.map(m => pollMerchant(m, fresh)));
 }
 
 // ── Push, not just poll ──────────────────────────────────────────────────

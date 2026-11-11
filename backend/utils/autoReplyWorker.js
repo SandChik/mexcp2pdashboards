@@ -266,8 +266,11 @@ async function cycle() {
       let orders;
       try {
         const ro = restOrders(merchant);
+        // v84: BingX / Gate through the SAME 3s-cached quick list the browser
+        // and the notifier use — calling fetchQuick directly cost extra calls
+        // in BingX's ~2 req/s per-account gate, which the Antrian then waited on.
         orders = ro
-          ? (await ro.fetchQuick(merchant)).map(o => ({ ...o, _state: o.state }))
+          ? (await require('../routes/orders').quickOrders(merchant)).map(o => ({ ...o, _state: o.state }))
           : await fetchRecentOrders(merchant, 24, 3);
         dg.lastError = null;
       }
