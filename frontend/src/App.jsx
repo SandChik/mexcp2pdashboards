@@ -44,6 +44,7 @@ export default function App() {
         <AppRoutes />
         <Toaster
           position="bottom-right"
+          containerStyle={{ bottom: 'calc(var(--dock-space) + 4px)' }}
           toastOptions={{
             style: {
               background: '#1a1d2e',

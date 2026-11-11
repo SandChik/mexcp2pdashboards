@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { notifyApi } from '../api';
 import { pushSupport, enablePush, disablePush, currentSubscription } from '../push';
-import { Bell, BellOff, Send, Smartphone, MessageCircle, RefreshCw, CheckCircle2, XCircle, Search } from 'lucide-react';
+import { Bell, BellOff, Send, RefreshCw, CheckCircle2, XCircle, Search } from 'lucide-react';
+import { SectionHeader, Card, Field, Toggle, Disclosure, inputCls, btnSm, btnSmGhost, btnSmPrimary } from './ui';
 import toast from 'react-hot-toast';
 
 /**
@@ -89,103 +90,77 @@ export default function NotifySettings() {
   }
 
   const ago = (ts) => ts ? `${Math.max(0, Math.round((Date.now() - ts) / 60000))} mnt lalu` : '—';
-  const inp = 'w-full bg-surface-900 border border-surface-700 rounded-lg px-3 py-2 text-sm text-surface-50 font-mono placeholder-surface-300/40 focus:outline-none focus:border-brand-500 transition-colors';
-  const btn = 'flex items-center gap-1.5 text-xs rounded-lg px-3 py-2 border transition-colors disabled:opacity-50';
 
   return (
-    <div className="card p-4 sm:p-5 space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Bell size={16} className="text-brand-400" />
-          <h2 className="text-white font-display font-semibold">Notifikasi</h2>
-        </div>
-        <button onClick={testAll} disabled={busy === 'test'} className={`${btn} border-brand-500/40 text-brand-300 hover:bg-brand-500/10`}>
-          <Send size={12} /> Tes semua jalur
-        </button>
-      </div>
+    <div className="space-y-3">
+      <SectionHeader title="Notifikasi"
+        desc="Dikirim oleh server lewat Telegram dan/atau notifikasi browser — tetap jalan walau dashboard ditutup."
+        action={<button onClick={testAll} disabled={busy === 'test'} className={btnSmGhost}><Send size={12} /> Tes semua</button>} />
 
       {/* 1. Events */}
-      <div>
-        <p className="text-xs text-surface-300 uppercase tracking-wide mb-2">Peristiwa yang memberi notif</p>
-        <div className="grid sm:grid-cols-2 gap-1.5">
-          {st && Object.entries(st.events || {}).map(([k, def]) => (
-            <button key={k} onClick={() => toggleEvent(k)}
-              className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 border transition-colors ${events[k] ? 'bg-brand-500/10 border-brand-500/40 text-brand-200' : 'bg-surface-900 border-surface-700 text-surface-300'}`}>
-              <span>{def.label}</span>
-              <span className={`text-[10px] font-mono uppercase ${events[k] ? 'text-buy' : 'text-surface-300/60'}`}>{events[k] ? 'ON' : 'off'}</span>
-            </button>
-          ))}
+      <Card title="Kirim notifikasi untuk">
+        <div className="grid sm:grid-cols-2 gap-x-6">
+          {st ? Object.entries(st.events || {}).map(([k, def]) => (
+            <div key={k} className="flex items-center justify-between gap-3 py-2 border-b border-surface-700/60">
+              <span className={`text-sm ${events[k] ? 'text-surface-50' : 'text-surface-300'}`}>{def.label}</span>
+              <Toggle small on={!!events[k]} onChange={() => toggleEvent(k)} label={def.label} />
+            </div>
+          )) : <div className="skeleton h-24 sm:col-span-2" />}
         </div>
-        {st?.watcher && (
-          <p className="text-[11px] font-mono text-surface-300 mt-2">
-            pemantau server: {st.watcher.on ? 'ON' : 'OFF'} · tiap {Math.round(st.watcher.intervalMs / 1000)}s · siklus {st.watcher.cycles} · terkirim {st.watcher.emitted}
-            {st.watcher.lastEvent && ` · terakhir: ${st.watcher.lastEvent.type} (${st.watcher.lastEvent.merchant}) ${ago(st.watcher.lastEvent.at)}`}
-            {st.watcher.lastError && <span className="text-sell"> · error: {st.watcher.lastError}</span>}
-          </p>
-        )}
-      </div>
+      </Card>
 
       {/* 2. Web Push */}
-      <div className="pt-4 border-t border-surface-700 space-y-2">
-        <div className="flex items-center gap-2"><Smartphone size={14} className="text-surface-300" /><p className="text-xs text-surface-300 uppercase tracking-wide">Notifikasi browser (Web Push) — perangkat ini</p></div>
+      <Card title="Browser — perangkat ini">
         {!sup.ok ? (
           <div className="bg-warning/10 border border-warning/30 rounded-lg px-3 py-2.5 text-xs text-warning space-y-1">
             {sup.reasons.map(r => <p key={r}>• {r}</p>)}
-            {!sup.secure && <p className="text-surface-200">Cara termudah dapat HTTPS: di VPS jalankan <code className="font-mono bg-surface-900 px-1 rounded">sudo tailscale serve --bg 3001</code>, lalu buka alamat <code className="font-mono">https://…ts.net</code> yang ditampilkan. Petunjuk lengkap di README.</p>}
+            {!sup.secure && <p className="text-surface-200">Butuh HTTPS: buka dashboard lewat alamat <code className="font-mono">https://…ts.net</code> (lihat README → Notifikasi).</p>}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             {thisSub
-              ? <button onClick={onDisablePush} disabled={busy === 'push'} className={`${btn} border-sell/40 text-sell hover:bg-sell/10`}><BellOff size={12} /> Matikan di perangkat ini</button>
-              : <button onClick={onEnablePush} disabled={busy === 'push'} className={`${btn} border-buy/40 text-buy hover:bg-buy/10`}><Bell size={12} /> Aktifkan di perangkat ini</button>}
-            <span className="text-[11px] font-mono text-surface-300">izin browser: {sup.permission}{sup.ios ? ' · iOS (Home Screen)' : ''}</span>
+              ? <button onClick={onDisablePush} disabled={busy === 'push'} className={`${btnSm} border-sell/40 text-sell hover:bg-sell/10`}><BellOff size={12} /> Matikan di perangkat ini</button>
+              : <button onClick={onEnablePush} disabled={busy === 'push'} className={`${btnSm} border-buy/40 text-buy hover:bg-buy/10`}><Bell size={12} /> Aktifkan di perangkat ini</button>}
+            <span className="text-[11px] text-surface-300">izin: {sup.permission}{sup.ios ? ' · iOS (Home Screen)' : ''}</span>
           </div>
         )}
         {st?.subscriptions?.length > 0 && (
-          <div className="bg-surface-900 rounded-lg p-2.5 text-[11px] font-mono space-y-1">
-            <p className="text-surface-300 uppercase tracking-wide text-[10px]">Perangkat terdaftar ({st.subscriptions.length})</p>
+          <div className="mt-3 space-y-1">
+            <p className="text-[11px] text-surface-300">Perangkat terdaftar ({st.subscriptions.length})</p>
             {st.subscriptions.map(s => (
-              <div key={s.id} className="flex items-center justify-between gap-2">
+              <div key={s.id} className="flex items-center justify-between gap-2 text-[11px] font-mono bg-surface-900 rounded-md px-2 py-1.5">
                 <span className="text-surface-200 truncate">{s.label || s.ua || s.id} · {s.fails ? <span className="text-sell">gagal {s.fails}× {s.lastError}</span> : s.lastOkAt ? <span className="text-buy">OK {ago(s.lastOkAt)}</span> : 'belum pernah dikirim'}</span>
-                <button onClick={() => removeDevice(s.id)} className="text-surface-300 hover:text-sell flex-shrink-0"><XCircle size={12} /></button>
+                <button onClick={() => removeDevice(s.id)} aria-label="Hapus perangkat" className="text-surface-300 hover:text-sell flex-shrink-0"><XCircle size={13} /></button>
               </div>
             ))}
           </div>
         )}
-        {!st?.webPush && <p className="text-[11px] text-sell">Server: paket <code>web-push</code> belum terpasang — jalankan deploy ulang (npm ci).</p>}
-      </div>
+        {st && !st.webPush && <p className="text-[11px] text-sell mt-2">Server: paket <code>web-push</code> belum terpasang — jalankan deploy ulang (npm ci).</p>}
+      </Card>
 
       {/* 3. Telegram */}
-      <div className="pt-4 border-t border-surface-700 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2"><MessageCircle size={14} className="text-surface-300" /><p className="text-xs text-surface-300 uppercase tracking-wide">Telegram bot</p></div>
-          <button onClick={() => saveTelegram({ enabled: !tg.enabled })} disabled={busy === 'tg'}
-            className={`relative w-10 h-5 rounded-full transition-colors ${tg.enabled ? 'bg-brand-500' : 'bg-surface-700'}`} title={tg.enabled ? 'Telegram ON' : 'Telegram OFF'}>
-            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${tg.enabled ? 'left-[22px]' : 'left-0.5'}`} />
-          </button>
-        </div>
-        <div className="grid sm:grid-cols-2 gap-2">
-          <div>
-            <label className="text-[11px] text-surface-300 block mb-1">Bot token (dari @BotFather)</label>
-            <input value={tg.botToken} onChange={e => setTg(t => ({ ...t, botToken: e.target.value }))} placeholder="123456789:AAH…" className={inp} />
-          </div>
-          <div>
-            <label className="text-[11px] text-surface-300 block mb-1">Chat ID</label>
+      <Card title="Telegram bot"
+        action={<Toggle on={tg.enabled} disabled={busy === 'tg'} onChange={() => saveTelegram({ enabled: !tg.enabled })} label={tg.enabled ? 'Telegram ON' : 'Telegram OFF'} />}>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Bot token (dari @BotFather)">
+            <input value={tg.botToken} onChange={e => setTg(t => ({ ...t, botToken: e.target.value }))} placeholder="123456789:AAH…" className={inputCls + ' font-mono'} />
+          </Field>
+          <Field label="Chat ID">
             <div className="flex gap-1.5">
-              <input value={tg.chatId} onChange={e => setTg(t => ({ ...t, chatId: e.target.value }))} placeholder="mis. 123456789" className={inp} />
-              <button onClick={detectChat} disabled={busy === 'detect' || !tg.botToken} title="Cari chat id dari pesan terakhir ke bot" className={`${btn} border-surface-600 text-surface-200 hover:bg-surface-700 flex-shrink-0`}>
+              <input value={tg.chatId} onChange={e => setTg(t => ({ ...t, chatId: e.target.value }))} placeholder="mis. 123456789" className={inputCls + ' font-mono'} />
+              <button type="button" onClick={detectChat} disabled={busy === 'detect' || !tg.botToken} title="Cari chat id dari pesan terakhir ke bot" className={`${btnSmGhost} !h-[38px] flex-shrink-0`}>
                 {busy === 'detect' ? <RefreshCw size={12} className="animate-spin" /> : <Search size={12} />} Deteksi
               </button>
             </div>
-          </div>
+          </Field>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => saveTelegram()} disabled={busy === 'tg'} className={`${btn} bg-brand-500 border-brand-500 text-white hover:bg-brand-600`}><CheckCircle2 size={12} /> Simpan</button>
-          <button onClick={testTelegram} disabled={busy === 'tgtest' || !tg.botToken || !tg.chatId} className={`${btn} border-surface-600 text-surface-200 hover:bg-surface-700`}><Send size={12} /> Tes kirim</button>
-          <button onClick={() => setShowGuide(g => !g)} className={`${btn} border-transparent text-surface-300 hover:text-surface-50`}>{showGuide ? 'Tutup panduan' : 'Panduan bikin bot'}</button>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button onClick={() => saveTelegram()} disabled={busy === 'tg'} className={btnSmPrimary}><CheckCircle2 size={12} /> Simpan</button>
+          <button onClick={testTelegram} disabled={busy === 'tgtest' || !tg.botToken || !tg.chatId} className={btnSmGhost}><Send size={12} /> Tes kirim</button>
+          <button onClick={() => setShowGuide(g => !g)} className={`${btnSm} border-transparent text-surface-300 hover:text-surface-50`}>{showGuide ? 'Tutup panduan' : 'Cara bikin bot'}</button>
         </div>
         {showGuide && (
-          <ol className="text-xs text-surface-200 space-y-1.5 list-decimal pl-5 bg-surface-900 rounded-lg p-3">
+          <ol className="mt-3 text-xs text-surface-200 space-y-1.5 list-decimal pl-5 bg-surface-900 rounded-lg p-3">
             <li>Di Telegram cari <b>@BotFather</b> → kirim <code className="font-mono">/newbot</code> → beri nama (mis. "SandChik Notif") dan username yang berakhiran <code className="font-mono">bot</code>.</li>
             <li>BotFather membalas dengan <b>token</b> (bentuknya <code className="font-mono">123456789:AAH…</code>). Salin ke kolom Bot token di atas. Token = kunci bot; jangan dibagikan.</li>
             <li>Buka bot yang baru dibuat di Telegram (link dari BotFather), tekan <b>Start</b> atau kirim "halo".</li>
@@ -193,19 +168,29 @@ export default function NotifySettings() {
             <li>Nyalakan toggle Telegram, <b>Simpan</b>, lalu <b>Tes kirim</b>.</li>
           </ol>
         )}
-      </div>
+      </Card>
 
-      {st?.recent?.length > 0 && (
-        <div className="pt-4 border-t border-surface-700">
-          <p className="text-xs text-surface-300 uppercase tracking-wide mb-1.5">Kiriman terakhir</p>
-          <div className="text-[11px] font-mono space-y-0.5 max-h-40 overflow-y-auto">
-            {st.recent.map((r, i) => (
-              <p key={i} className="text-surface-200">
-                {ago(r.at)} · {r.type} · {r.merchant} #{r.order} · push {r.push?.sent ?? 0}/{(r.push?.sent ?? 0) + (r.push?.failed ?? 0)}{r.telegram && r.telegram.ok !== null ? ` · tg ${r.telegram.ok ? 'OK' : 'gagal: ' + r.telegram.error}` : ''}
-              </p>
-            ))}
-          </div>
-        </div>
+      {/* 4. Diagnostics — collapsed; open it when "notif tidak masuk" */}
+      {st && (
+        <Disclosure summary={<>Diagnostik{st.watcher?.lastError && <span className="text-sell"> · ada error</span>}</>} defaultOpen={!!st.watcher?.lastError}>
+          {st.watcher && (
+            <p>
+              pemantau server: {st.watcher.on ? 'ON' : 'OFF'} · tiap {Math.round(st.watcher.intervalMs / 1000)}s · siklus {st.watcher.cycles} · terkirim {st.watcher.emitted}
+              {st.watcher.lastEvent && ` · terakhir: ${st.watcher.lastEvent.type} (${st.watcher.lastEvent.merchant}) ${ago(st.watcher.lastEvent.at)}`}
+              {st.watcher.lastError && <span className="text-sell"> · error: {st.watcher.lastError}</span>}
+            </p>
+          )}
+          {st.recent?.length > 0 ? (
+            <div className="pt-1 max-h-40 overflow-y-auto space-y-0.5">
+              <p className="text-surface-300">kiriman terakhir:</p>
+              {st.recent.map((r, i) => (
+                <p key={i}>
+                  {ago(r.at)} · {r.type} · {r.merchant} #{r.order} · push {r.push?.sent ?? 0}/{(r.push?.sent ?? 0) + (r.push?.failed ?? 0)}{r.telegram && r.telegram.ok !== null ? ` · tg ${r.telegram.ok ? 'OK' : 'gagal: ' + r.telegram.error}` : ''}
+                </p>
+              ))}
+            </div>
+          ) : <p className="text-surface-300">belum ada kiriman sejak server menyala</p>}
+        </Disclosure>
       )}
     </div>
   );

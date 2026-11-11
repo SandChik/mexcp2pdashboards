@@ -48,7 +48,54 @@
   @media (pointer: coarse) { input, select, textarea { font-size: 16px !important; } }
 }
 
+@layer base {
+  /* Height of the floating dock's lane (v81). Pages use .page-h so their own
+     scroll areas end above the dock instead of underneath it. */
+  :root { --dock-space: calc(74px + env(safe-area-inset-bottom)); }
+  @media (min-width: 768px) { :root { --dock-space: 84px; } }
+}
+
 @layer components {
+  .page-h { height: calc(100dvh - var(--dock-space)); }
+
+  /* ── Floating dock ─────────────────────────────────────────────────── */
+  .dock {
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(48,52,64,0.55) 0%, rgba(20,22,28,0.72) 100%);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 18px 40px -12px rgba(0,0,0,0.95);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
+  .dock-item { position: relative; display: flex; flex-direction: column; align-items: center; }
+  .dock-tile {
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 23%;
+    transform-origin: 50% 100%;
+    transition: transform .18s cubic-bezier(.2,.8,.2,1);
+    box-shadow: 0 4px 10px -4px rgba(0,0,0,0.8);
+  }
+  .dock-tile-glyph {
+    color: rgba(242,245,255,0.88);
+    background: linear-gradient(180deg, #3b3f4a 0%, #1d1f26 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.06), 0 4px 10px -4px rgba(0,0,0,0.8);
+  }
+  /* Magnify: the hovered tile most, its neighbours a little (desktop pointers only) */
+  @media (hover: hover) {
+    .dock-item:hover .dock-tile { transform: translateY(-7px) scale(1.22); }
+    .dock-item:hover + .dock-item .dock-tile,
+    .dock-item:has(+ .dock-item:hover) .dock-tile { transform: translateY(-3px) scale(1.09); }
+  }
+  .dock-item:active .dock-tile { filter: brightness(0.8); }
+  .dock-tip {
+    pointer-events: none; position: absolute; bottom: calc(100% + 16px); left: 50%;
+    transform: translateX(-50%); white-space: nowrap;
+    font-size: 12px; color: #f2f5ff; padding: 3px 9px; border-radius: 7px;
+    background: rgba(28,30,38,0.92); border: 1px solid rgba(255,255,255,0.10);
+    opacity: 0; transition: opacity .12s ease;
+  }
+  .dock-item:hover .dock-tip, .dock-item:focus-visible .dock-tip { opacity: 1; }
+
   .seg { @apply flex items-center gap-0.5 bg-surface-900 border border-surface-700 rounded-lg p-0.5; }
   .seg-btn { @apply px-2.5 py-1 rounded-md text-xs font-medium text-surface-200 hover:text-surface-50 transition-colors whitespace-nowrap tap-sm; }
   .seg-btn-active { @apply bg-brand-500/15 text-brand-300 shadow-glow-sm; }

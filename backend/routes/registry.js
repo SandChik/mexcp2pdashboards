@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const { authMiddleware } = require('../middleware/authMiddleware');
 const { captureBuyerLog, addBuyerLogEntries, deleteBuyerLogBatch, MANUAL_MERCHANT_ID } = require('../utils/captureCore');
-const { getMerchant } = require('../utils/store');
+const { getMerchant, readConfig } = require('../utils/store');
+const { readSettings, sourcesOf } = require('../utils/merchantSettings');
 const { audit } = require('../utils/audit');
 
 const router = express.Router();
@@ -58,20 +59,25 @@ router.delete('/manual/batch/:batchId', authMiddleware, async (req, res) => {
 });
 
 // GET /api/registry/:mid — the records that merchant's duplicate-name alert
-// compares against: ITS OWN captured orders + every manual/imported entry
-// (v80). Other merchants' orders are deliberately left out — a buyer who
-// already traded with merchant A is a NEW buyer for merchant B. Imported
-// entries carry no merchant, so they count for every merchant.
+// compares against: the SOURCES chosen for it in Settings → Catatan Buyer
+// (v81) — merchant ids and/or 'manual' (imports). Never chosen = the merchant
+// itself + imports (v80 behaviour). :mid = 'manual' → imports only.
 // ?all=true still returns everything (Catatan Buyer page "Semua merchant",
-// and the import dialog, whose rows land in every merchant's scope).
+// and the import dialog). `scopes` = every merchant's sources, so the page can
+// mark duplicates exactly the way each merchant's alert would.
 // Duplicates are computed on normalized realName; entries without a realName
 // can't participate in matching.
 router.get('/:mid', authMiddleware, (req, res) => {
   const log = readJson(LOG_PATH);
   const all = req.query.all === 'true';
   const mid = req.params.mid;
+  const settings = readSettings();
+  const scopes = {};
+  for (const m of readConfig().merchants || []) scopes[m.id] = sourcesOf(settings, m.id);
+  const sources = mid === MANUAL_MERCHANT_ID ? [MANUAL_MERCHANT_ID] : (scopes[mid] || sourcesOf(settings, mid));
+  const inScope = new Set(sources);
   const records = Object.entries(log)
-    .filter(([, r]) => all || r.merchantId === mid || r.merchantId === MANUAL_MERCHANT_ID)
+    .filter(([, r]) => all || inScope.has(r.merchantId))
     .map(([advOrderNo, r]) => ({ advOrderNo, ...r }))
     .sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
 
@@ -81,7 +87,7 @@ router.get('/:mid', authMiddleware, (req, res) => {
     const k = normName(r.realName);
     (nameIndex[k] = nameIndex[k] || []).push(r.advOrderNo);
   }
-  res.json({ records, nameIndex });
+  res.json({ records, nameIndex, sources, scopes });
 });
 
 // DELETE /api/registry/:mid/:advOrderNo — remove one record (e.g. false entry)

@@ -14,7 +14,7 @@ function writePause(o) { fs.writeFileSync(PAUSE_PATH, JSON.stringify(o, null, 2)
 
 // Settings storage + defaults live in utils/merchantSettings.js so the worker
 // runs exactly what the UI shows.
-const { DEFAULT_SETTINGS, readSettings, writeSettings, effectiveSettings } = require('../utils/merchantSettings');
+const { DEFAULT_SETTINGS, readSettings, writeSettings, effectiveSettings, cleanSources } = require('../utils/merchantSettings');
 
 const router = express.Router();
 
@@ -193,7 +193,9 @@ router.get('/:id/settings', authMiddleware, (req, res) => {
 // POST /api/merchants/:id/settings — update per-merchant settings
 router.post('/:id/settings', authMiddleware, (req, res) => {
   const all = readSettings();
-  all[req.params.id] = { ...DEFAULT_SETTINGS, ...(all[req.params.id] || {}), ...req.body };
+  const patch = { ...req.body };
+  if ('buyerLogSources' in patch) patch.buyerLogSources = cleanSources(patch.buyerLogSources);
+  all[req.params.id] = { ...DEFAULT_SETTINGS, ...(all[req.params.id] || {}), ...patch };
   writeSettings(all);
   res.json({ success: true, settings: all[req.params.id] });
 });

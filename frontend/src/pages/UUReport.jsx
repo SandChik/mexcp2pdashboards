@@ -107,7 +107,7 @@ export default function UUReport() {
 
   return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
+      <div className="page-h flex flex-col bg-surface-950 overflow-hidden">
         <header className="flex items-center gap-3 px-4 h-14 border-b border-surface-700 flex-shrink-0">
           <Users size={18} className="text-brand-400" />
           <h1 className="font-semibold text-surface-50 text-[15px]">Unique Users</h1>

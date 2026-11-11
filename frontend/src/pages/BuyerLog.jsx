@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { copyToClipboard } from '../clipboard';
 import { merchantApi, registryApi } from '../api';
 import Layout from '../components/Layout';
@@ -20,6 +21,7 @@ export default function BuyerLog() {
   const [merchants, setMerchants] = useState([]);
   const [merchantSel, setMerchantSel] = useState('all');
   const [records, setRecords] = useState([]);
+  const [scopes, setScopes] = useState({}); // merchantId -> sources its alert reads (Settings → Catatan Buyer)
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
   const [dupOnly, setDupOnly] = useState(false);
@@ -31,15 +33,16 @@ export default function BuyerLog() {
     if (merchants.length === 0) return;
     setLoading(true);
     try {
-      // One merchant → its own orders + every manual/imported entry: exactly
-      // what that merchant's "nama sama" alert compares against (v80).
+      // One merchant → exactly the records its "nama sama" alert compares
+      // against (the sources chosen in Settings → Catatan Buyer, v81).
       // "Semua" and "Manual / Impor" load everything (?all=true — any merchant
-      // id works as anchor): imports belong to every merchant's scope, so
-      // whether an imported name is a duplicate depends on all merchants.
+      // id works as anchor) plus every merchant's sources, so duplicates are
+      // marked the way each merchant's alert would see them.
       const one = merchantSel !== 'all' && merchantSel !== MANUAL_ID;
       const anchor = one ? merchantSel : merchants[0].id;
       const r = await registryApi.list(anchor, !one);
       setRecords(r.data?.records || []);
+      setScopes(one ? { [merchantSel]: r.data?.sources || [] } : (r.data?.scopes || {}));
     } catch (e) { toast.error('Gagal memuat catatan: ' + (e.response?.data?.error || e.message)); }
     finally { setLoading(false); }
   }
@@ -48,21 +51,17 @@ export default function BuyerLog() {
   const merchantName = (id) => id === MANUAL_ID ? 'Manual / Impor' : (merchants.find(m => m.id === id)?.name || id);
 
   const { rows, shown, dupNames, uniqueNames } = useMemo(() => {
-    // Duplicate = the same name twice inside ONE merchant's scope (its own
-    // orders + manual/imported entries) — the same comparison the panel and
-    // Antrian alert make since v80. A buyer seen once at merchant A and once at
-    // merchant B is NOT a duplicate.
-    const own = {};   // merchantId -> normName -> count (captured orders)
-    const imp = {};   // normName -> count (manual / imported: in every scope)
+    // Duplicate = the same name twice inside ONE merchant's scope (the
+    // sources its alert reads) — the same comparison the panel and Antrian
+    // make. A record counts in every scope that includes its merchant; its
+    // duplicate count is the highest of those.
+    const scopeList = Object.entries(scopes).map(([mid, srcs]) => ({ mid, srcs: new Set(srcs), counts: {} }));
     records.forEach(r => {
       if (!r.realName) return;
       const k = normName(r.realName);
-      if (r.merchantId === MANUAL_ID) imp[k] = (imp[k] || 0) + 1;
-      else { const o = own[r.merchantId] || (own[r.merchantId] = {}); o[k] = (o[k] || 0) + 1; }
+      scopeList.forEach(sc => { if (sc.srcs.has(r.merchantId)) sc.counts[k] = (sc.counts[k] || 0) + 1; });
     });
-    const scopeCount = (r, k) => r.merchantId === MANUAL_ID
-      ? (imp[k] || 0) + Math.max(0, ...Object.values(own).map(o => o[k] || 0))
-      : (own[r.merchantId]?.[k] || 0) + (imp[k] || 0);
+    const scopeCount = (r, k) => scopeList.reduce((n, sc) => sc.srcs.has(r.merchantId) ? Math.max(n, sc.counts[k] || 0) : n, 0);
     const base = merchantSel === MANUAL_ID ? records.filter(r => r.merchantId === MANUAL_ID) : records;
     const names = new Set(), dups = new Set();
     let list = base.map(r => {
@@ -81,7 +80,7 @@ export default function BuyerLog() {
       (r.advOrderNo || '').toLowerCase().includes(query));
     if (dupOnly) list = list.filter(r => r._dup);
     return { rows: list, shown: base.length, dupNames: dups.size, uniqueNames: names.size };
-  }, [records, merchantSel, q, dupOnly]);
+  }, [records, scopes, merchantSel, q, dupOnly]);
 
   // Recent manual/import batches, derived from the loaded records — lets one bad
   // import be undone in a single click instead of deleting rows one by one.
@@ -128,19 +127,19 @@ export default function BuyerLog() {
 
   return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
+      <div className="page-h flex flex-col bg-surface-950 overflow-hidden">
         <header className="flex items-center gap-3 px-4 h-14 border-b border-surface-700 flex-shrink-0">
           <BookUser size={18} className="text-brand-400" />
           <h1 className="font-semibold text-surface-50 text-[15px]">Catatan Buyer</h1>
-          <span className="text-xs text-surface-300">nama KYC pembeli dari order yang selesai — sumber alert "nama sama"</span>
+          <span className="hidden md:inline text-xs text-surface-300 truncate">nama KYC pembeli dari order yang selesai — sumber alert "nama sama"</span>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          <div className={card + ' p-4'}>
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+          <div className={card + ' p-3 sm:p-4'}>
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3">
               <div>
                 <label className="text-xs text-surface-300 uppercase tracking-wide block mb-1.5">Merchant</label>
-                <select value={merchantSel} onChange={e => setMerchantSel(e.target.value)} className={inp + ' min-w-[180px]'}>
+                <select value={merchantSel} onChange={e => setMerchantSel(e.target.value)} className={inp + ' w-full sm:w-auto min-w-[180px]'}>
                   <option value="all">Semua merchant</option>
                   {merchants.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                   <option value={MANUAL_ID}>Manual / Impor</option>
@@ -154,6 +153,8 @@ export default function BuyerLog() {
                     className={inp + ' w-full pl-8'} />
                 </div>
               </div>
+              {/* Phone: one wrapping row of compact buttons. sm+: `contents` = same layout as before. */}
+              <div className="flex flex-wrap gap-2 sm:contents">
               <button onClick={() => setDupOnly(d => !d)}
                 className={`flex items-center gap-1.5 text-xs rounded-md px-3 py-2.5 border transition-colors ${dupOnly ? 'bg-sell/15 text-sell border-sell/40' : 'bg-surface-900 text-surface-300 border-surface-700 hover:text-surface-50'}`}>
                 <AlertTriangle size={13} /> Hanya duplikat
@@ -174,17 +175,20 @@ export default function BuyerLog() {
                 className="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium rounded-md px-4 py-2 transition-colors">
                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
               </button>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Total catatan</p><p className="text-2xl font-mono font-semibold text-surface-50 mt-1">{shown}</p></div>
-            <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Nama unik</p><p className="text-2xl font-mono font-semibold text-brand-400 mt-1">{uniqueNames}</p></div>
-            <div className={card + ' p-4'}><p className="text-xs text-surface-300 uppercase tracking-wide">Nama duplikat</p><p className={`text-2xl font-mono font-semibold mt-1 ${dupNames ? 'text-sell' : 'text-surface-50'}`}>{dupNames}</p></div>
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            <div className={card + ' p-3 sm:p-4'}><p className="text-[10px] sm:text-xs text-surface-300 uppercase tracking-wide">Total catatan</p><p className="text-xl sm:text-2xl font-mono font-semibold text-surface-50 mt-1">{shown}</p></div>
+            <div className={card + ' p-3 sm:p-4'}><p className="text-[10px] sm:text-xs text-surface-300 uppercase tracking-wide">Nama unik</p><p className="text-xl sm:text-2xl font-mono font-semibold text-brand-400 mt-1">{uniqueNames}</p></div>
+            <div className={card + ' p-3 sm:p-4'}><p className="text-[10px] sm:text-xs text-surface-300 uppercase tracking-wide">Nama duplikat</p><p className={`text-xl sm:text-2xl font-mono font-semibold mt-1 ${dupNames ? 'text-sell' : 'text-surface-50'}`}>{dupNames}</p></div>
           </div>
 
           <p className="text-xs text-surface-300 -mt-1">
-            "Nama sama" dihitung per merchant: order merchant itu sendiri + data impor/manual. Pembeli yang sudah pernah order di merchant lain tidak dianggap duplikat.
+            "Nama sama" dihitung per merchant, dari sumber yang dipilih di{' '}
+            <Link to="/settings?tab=buyer" className="text-brand-300 hover:underline">Settings → Catatan Buyer</Link>{' '}
+            (bawaan: merchant itu sendiri + impor).
           </p>
 
           {batches.length > 0 && (

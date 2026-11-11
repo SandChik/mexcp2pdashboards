@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { merchantApi } from '../api';
 import MerchantPanel from '../components/MerchantPanel';
 import Layout from '../components/Layout';
-import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X, Bell } from 'lucide-react';
+import DashboardHeader from '../components/DashboardHeader';
+import { Plus, CalendarRange } from 'lucide-react';
 import { subscribeQueue, getActiveByMerchant } from '../actionQueue';
 import { useNavigate } from 'react-router-dom';
 
@@ -149,7 +150,7 @@ export default function Dashboard() {
   // coming is visible immediately (heuristic #1).
   if (loading) return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950 p-3 gap-3">
+      <div className="page-h flex flex-col bg-surface-950 p-3 gap-3">
         <div className="skeleton h-12 w-full" />
         <div className="grid gap-3 flex-1 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map(i => <div key={i} className="skeleton h-full min-h-[200px]" />)}
@@ -188,102 +189,23 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950">
+      <div className="page-h flex flex-col bg-surface-950">
 
-        {/* ── Top bar ─────────────────────────────────────────────────── */}
-        <header className="glass border-b flex-shrink-0 z-30">
-          <div className="flex items-center justify-between gap-2 px-3 sm:px-4 h-14">
-            <div className="flex items-center gap-2 min-w-0">
-              <img src="/brand/sandchik-mark.png" alt="SandChik" className="w-7 h-7 rounded-md bg-[#f6f3ee] flex-shrink-0" />
-              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">SandChik P2P</h1>
-              <img src="/brand/mexc.png" alt="MEXC" className="w-5 h-5 rounded-md bg-white flex-shrink-0" title="Dashboard MEXC" />
-              <span className="hidden xs:inline text-xs text-surface-300 flex-shrink-0">{merchants.length} merchant</span>
-            </div>
-
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-              {/* Date — desktop popover, mobile bottom sheet */}
-              <div className="relative" ref={dateRef}>
-                <button onClick={() => setShowDate(s => !s)} aria-expanded={showDate}
-                  className="btn-ghost !px-2.5 !h-8 !text-xs max-w-[140px]">
-                  <Calendar size={13} className="flex-shrink-0" />
-                  <span className="truncate">{rangeLabel}</span>
-                </button>
-                {showDate && <div className="hidden sm:block absolute right-0 top-10 z-40">{datePanel}</div>}
-              </div>
-
-
-              <button onClick={() => setAutoRefresh(a => !a)}
-                title="Auto-refresh data tiap 5 detik (ini TIDAK menghentikan trading)"
-                className={`flex items-center gap-1.5 text-xs rounded-lg px-2 sm:px-2.5 h-8 border transition-all ${
-                  autoRefresh ? 'text-buy border-buy/30 bg-buy/10 shadow-glow-buy' : 'text-surface-300 border-surface-700 hover:bg-surface-800'}`}>
-                <Radio size={13} className={autoRefresh ? 'animate-pulse' : ''} />
-                <span className="hidden sm:inline">{autoRefresh ? 'Auto' : 'Manual'}</span>
-              </button>
-
-              <button onClick={() => setRefreshKey(k => k + 1)} title="Refresh semua panel"
-                className="w-8 h-8 flex items-center justify-center text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg transition-colors">
-                <RefreshCw size={14} />
-              </button>
-
-              <button onClick={() => navigate('/settings')} title="Tambah merchant"
-                className="btn-primary !h-8 !px-2.5 sm:!px-3 !text-xs">
-                <Plus size={14} /><span className="hidden sm:inline">Merchant</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Mobile: merchant switcher — one panel at a time beats a squashed grid */}
-          {merchants.length > 1 && (
-            <div className="lg:hidden flex gap-1.5 px-3 pb-2 overflow-x-auto no-scrollbar">
-              {merchants.slice(0, 3).map((m, i) => {
-                const n = activeCounts[m.id] ?? 0;
-                return (
-                  <button key={m.id} onClick={() => { setActiveMerchant(i); if (alert?.index === i) setAlert(null); }}
-                    className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium rounded-lg px-3 py-1.5 border transition-all ${
-                      activeMerchant === i
-                        ? 'bg-brand-500/15 text-brand-300 border-brand-500/40 shadow-glow-sm'
-                        : n > 0
-                          ? 'text-surface-100 border-brand-500/30 hover:text-surface-50'
-                          : 'text-surface-300 border-surface-700 hover:text-surface-50'}`}>
-                    {m.name}
-                    {n > 0 && (
-                      <span className="bg-brand-500 text-white text-[10px] font-semibold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center">
-                        {n > 99 ? '99+' : n}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Activity on a panel you can't currently see */}
-          {alert && (
-            <button onClick={() => { setActiveMerchant(alert.index); setAlert(null); }}
-              className="lg:hidden w-full flex items-center gap-2 px-3 py-2 bg-brand-500/15 border-t border-brand-500/30 text-left animate-slide-up">
-              <Bell size={13} className="text-brand-300 flex-shrink-0" />
-              <span className="text-xs text-brand-200 flex-1 truncate">
-                {alert.delta} order baru di <b className="font-semibold text-brand-100">{alert.name}</b> — ketuk untuk lihat
-              </span>
-              <X size={14} className="text-surface-300 flex-shrink-0"
-                onClick={e => { e.stopPropagation(); setAlert(null); }} />
-            </button>
-          )}
-        </header>
-
-        {/* Mobile bottom sheet for date */}
-        {showDate && (
-          <div className="sm:hidden fixed inset-0 z-50 flex items-end animate-fade-in" onClick={() => setShowDate(false)}>
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-            <div ref={sheetRef} className="relative w-full p-3 pb-safe animate-sheet-up" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-sm font-medium text-surface-50">Pilih rentang</span>
-                <button onClick={() => setShowDate(false)} className="text-surface-300 hover:text-surface-50 p-1"><X size={18} /></button>
-              </div>
-              {datePanel}
-            </div>
-          </div>
-        )}
+        <DashboardHeader
+          platform={{ logo: '/brand/mexc.png', label: 'MEXC' }} merchantCount={merchants.length}
+          rangeLabel={rangeLabel} showDate={showDate} setShowDate={setShowDate}
+          dateRef={dateRef} sheetRef={sheetRef} datePanel={datePanel}
+          autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh}
+          onRefresh={() => setRefreshKey(k => k + 1)}
+          autoTitle="Auto-refresh data tiap 5 detik (ini TIDAK menghentikan trading)"
+          onAdd={() => navigate('/settings')} addTitle="Tambah merchant"
+          switcher={{
+            items: merchants.slice(0, 3).map(m => ({ id: m.id, name: m.name, count: activeCounts[m.id] ?? 0 })),
+            active: activeMerchant,
+            onSelect: (i) => { setActiveMerchant(i); if (alert?.index === i) setAlert(null); },
+          }}
+          alert={alert} onAlertOpen={() => { setActiveMerchant(alert.index); setAlert(null); }} onAlertClose={() => setAlert(null)}
+        />
 
         {/* ── Panels ──────────────────────────────────────────────────── */}
         {merchants.length === 0 ? (

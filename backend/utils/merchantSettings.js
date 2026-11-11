@@ -26,11 +26,25 @@ const DEFAULT_RULES = [
   { id: 'buyPaid', side: 'BUY', state: 1, message: 'Transfer sudah kami lakukan \u2705 Mohon dicek dan segera release koinnya ya kak. Terima kasih \ud83d\ude4f' },
   { id: 'buyDone', side: 'BUY', state: 4, message: 'Pesanan selesai \ud83c\udf89 Terima kasih sudah bertransaksi, kak. Jika berkenan, mohon tinggalkan review positif ya \ud83d\ude4f' },
 ];
-const DEFAULT_SETTINGS = { buyerLog: false, autoReplyEnabled: true, autoReplyRules: DEFAULT_RULES, quickReplies: DEFAULT_QUICK };
+// buyerLogSources (v81): which buyer-log records this merchant's "nama sama"
+// alert compares against — merchant ids and/or 'manual' (imports). null = never
+// chosen → the merchant itself + imports (the v80 behaviour). See sourcesOf().
+const DEFAULT_SETTINGS = { buyerLog: false, autoReplyEnabled: true, autoReplyRules: DEFAULT_RULES, quickReplies: DEFAULT_QUICK, buyerLogSources: null };
 
 function readSettings() { try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); } catch { return {}; } }
 function writeSettings(o) { try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(o, null, 2)); } catch {} }
 /** Settings as the UI shows them: defaults filled in for anything never saved. */
 function effectiveSettings(all, merchantId) { return { ...DEFAULT_SETTINGS, ...((all || {})[merchantId] || {}) }; }
 
-module.exports = { SETTINGS_PATH, DEFAULT_QUICK, DEFAULT_RULES, DEFAULT_SETTINGS, readSettings, writeSettings, effectiveSettings };
+/** The buyer-log sources a merchant's duplicate alert reads (v81). */
+function sourcesOf(all, merchantId) {
+  const s = effectiveSettings(all, merchantId).buyerLogSources;
+  return Array.isArray(s) ? s : [merchantId, 'manual'];
+}
+/** Keep only plausible ids (strings, deduped, capped) — the list comes from the browser. */
+function cleanSources(v) {
+  if (!Array.isArray(v)) return null;
+  return [...new Set(v.filter(x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x)))].slice(0, 32);
+}
+
+module.exports = { SETTINGS_PATH, DEFAULT_QUICK, DEFAULT_RULES, DEFAULT_SETTINGS, readSettings, writeSettings, effectiveSettings, sourcesOf, cleanSources };

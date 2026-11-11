@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { merchantApi } from '../api';
 import MerchantPanel from '../components/MerchantPanel';
 import Layout from '../components/Layout';
+import DashboardHeader from '../components/DashboardHeader';
 import { PlatformBadge } from '../components/helpers';
-import { Plus, RefreshCw, Calendar, Radio, CalendarRange, X } from 'lucide-react';
+import { CalendarRange } from 'lucide-react';
 import { subscribeQueue, getActiveByMerchant } from '../actionQueue';
 import { useNavigate } from 'react-router-dom';
 
@@ -154,7 +155,7 @@ export default function BingxDashboard() {
 
   if (loading) return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950 p-3 gap-3">
+      <div className="page-h flex flex-col bg-surface-950 p-3 gap-3">
         <div className="skeleton h-12 w-full" />
         <div className="grid gap-3 flex-1 grid-cols-1 lg:grid-cols-2">
           {[0, 1].map(i => <div key={i} className="skeleton h-full min-h-[200px]" />)}
@@ -167,77 +168,21 @@ export default function BingxDashboard() {
 
   return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950">
-        <header className="glass border-b flex-shrink-0 z-30">
-          <div className="flex items-center justify-between gap-2 px-3 sm:px-4 h-14">
-            <div className="flex items-center gap-2 min-w-0">
-              <img src="/brand/sandchik-mark.png" alt="SandChik" className="w-7 h-7 rounded-md bg-[#f6f3ee] flex-shrink-0" />
-              <h1 className="font-display font-semibold text-surface-50 text-[15px] tracking-tight truncate">SandChik P2P</h1>
-              <img src="/brand/bingx.png" alt="BingX" className="w-5 h-5 rounded-md bg-white flex-shrink-0" title="Dashboard BingX" />
-              <span className="hidden xs:inline text-xs text-surface-300 flex-shrink-0">{merchants.length} merchant</span>
-            </div>
-
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-              {/* Date — desktop popover, mobile bottom sheet (same as the MEXC dashboard) */}
-              <div className="relative" ref={dateRef}>
-                <button onClick={() => setShowDate(s => !s)} aria-expanded={showDate}
-                  className="btn-ghost !px-2.5 !h-8 !text-xs max-w-[170px]">
-                  <Calendar size={13} className="flex-shrink-0" />
-                  <span className="truncate">{rangeLabel}</span>
-                </button>
-                {showDate && <div className="hidden sm:block absolute right-0 top-10 z-40">{datePanel}</div>}
-              </div>
-
-              <button onClick={() => setAutoRefresh(a => !a)}
-                title="Auto-refresh data tiap 5 detik"
-                className={`flex items-center gap-1.5 text-xs rounded-lg px-2 sm:px-2.5 h-8 border transition-all ${
-                  autoRefresh ? 'text-buy border-buy/30 bg-buy/10 shadow-glow-buy' : 'text-surface-300 border-surface-700 hover:bg-surface-800'}`}>
-                <Radio size={13} className={autoRefresh ? 'animate-pulse' : ''} />
-                <span className="hidden sm:inline">{autoRefresh ? 'Auto' : 'Manual'}</span>
-              </button>
-
-              <button onClick={() => setRefreshKey(k => k + 1)} title="Refresh semua panel"
-                className="w-8 h-8 flex items-center justify-center text-surface-200 hover:text-surface-50 border border-surface-700 hover:bg-surface-800 rounded-lg transition-colors">
-                <RefreshCw size={14} />
-              </button>
-
-              <button onClick={() => navigate('/settings')} title="Tambah merchant BingX"
-                className="btn-primary !h-8 !px-2.5 sm:!px-3 !text-xs">
-                <Plus size={14} /><span className="hidden sm:inline">Merchant</span>
-              </button>
-            </div>
-          </div>
-
-          {shown.length > 1 && (
-            <div className="lg:hidden flex gap-1.5 px-3 pb-2 overflow-x-auto no-scrollbar">
-              {shown.map((m, i) => {
-                const n = activeCounts[m.id] ?? 0;
-                return (
-                  <button key={m.id} onClick={() => setActiveMerchant(i)}
-                    className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium rounded-lg px-3 py-1.5 border transition-all ${
-                      activeMerchant === i ? 'bg-brand-500/15 text-brand-300 border-brand-500/40 shadow-glow-sm'
-                        : n > 0 ? 'text-surface-100 border-brand-500/30' : 'text-surface-300 border-surface-700'}`}>
-                    {m.name}
-                    {n > 0 && <span className="bg-brand-500 text-white text-[10px] font-semibold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center">{n}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </header>
-
-        {showDate && (
-          <div className="sm:hidden fixed inset-0 z-50 flex items-end animate-fade-in" onClick={() => setShowDate(false)}>
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-            <div ref={sheetRef} className="relative w-full p-3 pb-safe animate-sheet-up" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-sm font-medium text-surface-50">Pilih rentang</span>
-                <button onClick={() => setShowDate(false)} className="text-surface-300 hover:text-surface-50 p-1"><X size={18} /></button>
-              </div>
-              {datePanel}
-            </div>
-          </div>
-        )}
+      <div className="page-h flex flex-col bg-surface-950">
+        <DashboardHeader
+          platform={{ logo: '/brand/bingx.png', label: 'BingX' }} merchantCount={merchants.length}
+          rangeLabel={rangeLabel} showDate={showDate} setShowDate={setShowDate}
+          dateRef={dateRef} sheetRef={sheetRef} datePanel={datePanel}
+          autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh}
+          onRefresh={() => setRefreshKey(k => k + 1)}
+          autoTitle="Auto-refresh data tiap 5 detik"
+          onAdd={() => navigate('/settings')} addTitle="Tambah merchant BingX"
+          switcher={{
+            items: shown.map(m => ({ id: m.id, name: m.name, count: activeCounts[m.id] ?? 0 })),
+            active: activeMerchant,
+            onSelect: (i) => setActiveMerchant(i),
+          }}
+        />
 
         {shown.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">

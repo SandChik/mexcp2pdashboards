@@ -83,7 +83,7 @@ export default function ActionQueue() {
   }, [items, details]);
 
   // Buyer-log name index PER MERCHANT ({ merchantId: { name: [orderNo] } }) —
-  // each order is checked against its own merchant's log + imports only (v80).
+  // each order is checked against its own merchant's chosen sources (v81).
   // Owned by the shared poller so it stays fresh on every page.
   const nameIdx = getNameIndex();
 
@@ -166,7 +166,7 @@ export default function ActionQueue() {
 
   return (
     <Layout>
-      <div className="h-[100dvh] flex flex-col bg-surface-950 overflow-hidden">
+      <div className="page-h flex flex-col bg-surface-950 overflow-hidden">
 
         <header className="glass border-b flex items-center gap-2 px-3 sm:px-4 h-14 flex-shrink-0">
           <Zap size={17} className="text-brand-300 flex-shrink-0" />

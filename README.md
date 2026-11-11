@@ -380,6 +380,31 @@ iklan, order berjalan, rekening, saldo spot).
 - **Backup harian** (`deploy/backup.sh`) — sebelumnya server tidak punya backup
   sama sekali. Lihat `deploy/DEPLOY.md` → Backup.
 
+## v81 — sumber Catatan Buyer per merchant, Settings baru, dock
+
+- **Sumber alert "nama sama" dipilih per merchant** di Settings → Catatan
+  Buyer: tiap merchant mencentang catatan merchant mana saja (dan/atau
+  Impor/manual) yang jadi pembandingnya. Bawaan (belum pernah diatur) =
+  merchant itu sendiri + impor, sama dengan v80. Disimpan sebagai
+  `buyerLogSources` di `merchant-settings.json`; server yang menerapkannya
+  (`GET /api/registry/:mid` → `sources`, `scopes`), jadi panel, Antrian, dan
+  halaman Catatan Buyer selalu sepakat. Saklar "Catat & alert" (sama dengan
+  menu ⋮ panel) juga ada di sana.
+- **Settings dirombak** jadi tab (Merchant · Catatan Buyer · Notifikasi ·
+  Auto-reply · Suara · Akun; tab tersimpan di URL `?tab=`). Fungsi sama;
+  diagnostik (status worker auto-reply, pemantau notifikasi) dilipat dan
+  terbuka sendiri bila ada error; label seragam bahasa Indonesia; catatan kaki
+  usang dibuang. "Uji POST (no-op)" BingX kini muncul di hasil "Tes koneksi".
+  Tombol **Keluar** ada di Settings → Akun (dulu HP tidak punya).
+- **Dock mengambang** menggantikan sidebar (desktop: gaya macOS, membesar saat
+  disorot, titik = halaman aktif; HP: dock berlabel). Halaman memakai
+  `.page-h` (= 100dvh − `--dock-space`), jadi dock punya jalurnya sendiri dan
+  tidak menutupi panel.
+- **Header dashboard** MEXC/BingX/Gate kini satu komponen
+  (`DashboardHeader.jsx`). HP: platform + jumlah merchant, satu grup tombol
+  (rentang · auto · refresh), pemilih merchant berbentuk segmen; "+ Merchant"
+  hanya di desktop. Catatan Buyer di HP juga dirapikan.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

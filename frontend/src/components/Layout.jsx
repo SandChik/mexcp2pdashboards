@@ -1,28 +1,49 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Users, UserPlus, BookUser, Settings, LogOut, Zap } from 'lucide-react';
-
-// Brand marks (frontend/public/brand, upscaled from the operator's own files).
-// Same call signature as a lucide icon so NAV can mix them.
-const brandIcon = (src, alt) => function BrandIcon({ size = 18, className = '' }) {
-  return <img src={src} alt={alt} width={size} height={size} className={`rounded-[4px] bg-white ${className}`} style={{ width: size, height: size }} />;
-};
-const MexcIcon = brandIcon('/brand/mexc.png', 'MEXC');
-const BingxIcon = brandIcon('/brand/bingx.png', 'BingX');
-const GateIcon = brandIcon('/brand/gate.svg', 'Gate');
 import { subscribeQueue, getActionableCount } from '../actionQueue';
 
-const NAV = [
-  { to: '/',         icon: MexcIcon,        label: 'Dashboard MEXC', short: 'MEXC' },
-  { to: '/bingx',    icon: BingxIcon,       label: 'Dashboard BingX', short: 'BingX' },
-  { to: '/gate',     icon: GateIcon,        label: 'Dashboard Gate', short: 'Gate' },
-  { to: '/queue',    icon: Zap,             label: 'Antrian',   short: 'Antrian', badge: true },
-  { to: '/uu',       icon: Users,           label: 'Unique Users', short: 'UU'  },
-  { to: '/ftd',      icon: UserPlus,        label: 'FTD',       short: 'FTD'    },
-  { to: '/buyers',   icon: BookUser,        label: 'Catatan Buyer', short: 'Buyer' },
-  { to: '/settings', icon: Settings,        label: 'Settings',  short: 'Setting' },
+// Floating dock (v81) — replaces the left icon rail on desktop and the edge-to-
+// edge tab bar on phones. Pages size themselves with `.page-h` (100dvh minus
+// --dock-space, see index.css), so the dock gets its own lane and never covers
+// a panel's last row.
+
+const NAV_GROUPS = [
+  [
+    { to: '/',      logo: '/brand/mexc.png',  label: 'Dashboard MEXC',  short: 'MEXC' },
+    { to: '/bingx', logo: '/brand/bingx.png', label: 'Dashboard BingX', short: 'BingX' },
+    { to: '/gate',  logo: '/brand/gate.svg',  label: 'Dashboard Gate',  short: 'Gate' },
+  ],
+  [
+    { to: '/queue',  icon: Zap,      label: 'Antrian',       short: 'Antrian', badge: true },
+    { to: '/uu',     icon: Users,    label: 'Unique Users',  short: 'UU' },
+    { to: '/ftd',    icon: UserPlus, label: 'FTD',           short: 'FTD' },
+    { to: '/buyers', icon: BookUser, label: 'Catatan Buyer', short: 'Buyer' },
+  ],
+  [
+    { to: '/settings', icon: Settings, label: 'Settings', short: 'Setting' },
+  ],
 ];
+
+function Tile({ item, size }) {
+  const { logo, icon: Icon, label } = item;
+  if (logo) return <img src={logo} alt={label} className="dock-tile bg-white object-contain" style={{ width: size, height: size }} />;
+  return (
+    <span className="dock-tile dock-tile-glyph" style={{ width: size, height: size }}>
+      <Icon size={Math.round(size * 0.46)} strokeWidth={1.9} />
+    </span>
+  );
+}
+
+function Badge({ n, cap }) {
+  if (!(n > 0)) return null;
+  return (
+    <span className="absolute -top-1 -right-1 z-10 bg-sell text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ring-2 ring-black/70">
+      {n > cap ? `${cap}+` : n}
+    </span>
+  );
+}
 
 export default function Layout({ children }) {
   const { logout } = useAuth();
@@ -37,70 +58,50 @@ export default function Layout({ children }) {
   const pending = getActionableCount();
 
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col md:flex-row">
+    <div className="min-h-[100dvh]">
+      <main className="min-w-0 overflow-hidden">{children}</main>
 
-      {/* ── Desktop: icon rail with hover labels ─────────────────────────── */}
-      <aside className="hidden md:flex w-14 border-r border-surface-700 glass flex-col items-center py-3 gap-1 flex-shrink-0">
-        <div className="w-9 h-9 rounded-lg overflow-hidden shadow-glow mb-3 bg-[#f6f3ee]" title="SandChik Crypto Exchange">
-          <img src="/brand/sandchik-mark.png" alt="SandChik" className="w-9 h-9" />
-        </div>
-        {NAV.map(({ to, icon: Icon, label, badge }) => (
-          <NavLink key={to} to={to} end={to === '/'}
-            className={({ isActive }) =>
-              `group relative w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
-                isActive
-                  ? 'bg-brand-500/15 text-brand-300 ring-1 ring-brand-500/40 shadow-glow-sm'
-                  : 'text-surface-300 hover:text-surface-50 hover:bg-surface-800'
-              }`}>
+      {/* ── Desktop: macOS-style dock, magnifies on hover ─────────────────── */}
+      <nav aria-label="Menu utama" className="dock hidden md:flex fixed bottom-3 left-1/2 -translate-x-1/2 z-40 items-end gap-1 px-2 pt-2 pb-1.5">
+        {NAV_GROUPS.map((group, gi) => (
+          <Fragment key={gi}>
+            {gi > 0 && <span aria-hidden className="w-px self-stretch my-1 mx-1.5 bg-white/10" />}
+            {group.map(item => (
+              <NavLink key={item.to} to={item.to} end={item.to === '/'} aria-label={item.label} className="dock-item group">
+                {({ isActive }) => (<>
+                  <span className="relative block">
+                    <Tile item={item} size={44} />
+                    {item.badge && <Badge n={pending} cap={99} />}
+                  </span>
+                  <span className={`block mx-auto mt-1 w-1 h-1 rounded-full transition-opacity ${isActive ? 'bg-surface-50 opacity-90' : 'opacity-0'}`} />
+                  <span className="dock-tip">{item.label}</span>
+                </>)}
+              </NavLink>
+            ))}
+          </Fragment>
+        ))}
+        <span aria-hidden className="w-px self-stretch my-1 mx-1.5 bg-white/10" />
+        <button onClick={doLogout} aria-label="Keluar" className="dock-item group">
+          <span className="dock-tile dock-tile-glyph hover:!text-sell" style={{ width: 44, height: 44 }}><LogOut size={19} strokeWidth={1.9} /></span>
+          <span className="block mx-auto mt-1 w-1 h-1 opacity-0" />
+          <span className="dock-tip">Keluar</span>
+        </button>
+      </nav>
+
+      {/* ── Phone: the same dock, floating, labelled for the thumb ───────── */}
+      <nav aria-label="Menu utama" className="dock md:hidden fixed inset-x-2 bottom-[calc(8px+env(safe-area-inset-bottom))] z-40 flex px-1 pt-1.5 pb-2">
+        {NAV_GROUPS.flat().map(item => (
+          <NavLink key={item.to} to={item.to} end={item.to === '/'}
+            className="flex-1 min-w-0 flex flex-col items-center gap-1">
             {({ isActive }) => (<>
-              <Icon size={18} />
-              {badge && pending > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-brand-500 text-white text-[9px] font-semibold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-glow-sm">
-                  {pending > 99 ? '99+' : pending}
-                </span>
-              )}
-              {isActive && <span className="absolute -left-[7px] top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-brand-400 shadow-glow-sm" />}
-              {/* Label on hover — recognition instead of guessing what the icon means */}
-              <span className="pointer-events-none absolute left-12 z-50 whitespace-nowrap rounded-md bg-surface-800 border border-surface-700 px-2 py-1 text-xs text-surface-50
-                               opacity-0 group-hover:opacity-100 transition-opacity shadow-lift">{label}</span>
+              <span className={`relative rounded-[11px] transition-all ${isActive ? 'ring-2 ring-brand-400/80 ring-offset-2 ring-offset-black/60' : ''}`}>
+                <Tile item={item} size={32} />
+                {item.badge && <Badge n={pending} cap={9} />}
+              </span>
+              <span className={`text-[10px] leading-tight font-medium truncate max-w-full ${isActive ? 'text-surface-50' : 'text-surface-300'}`}>{item.short}</span>
             </>)}
           </NavLink>
         ))}
-        <div className="flex-1" />
-        <button onClick={doLogout} title="Log out"
-          className="group relative w-10 h-10 rounded-lg flex items-center justify-center text-surface-300 hover:text-sell hover:bg-sell/10 transition-colors">
-          <LogOut size={18} />
-          <span className="pointer-events-none absolute left-12 z-50 whitespace-nowrap rounded-md bg-surface-800 border border-surface-700 px-2 py-1 text-xs text-surface-50
-                           opacity-0 group-hover:opacity-100 transition-opacity">Log out</span>
-        </button>
-      </aside>
-
-      {/* Content. On mobile the bottom bar overlays, so reserve room for it. */}
-      <main className="flex-1 min-w-0 overflow-hidden pb-[60px] md:pb-0">{children}</main>
-
-      {/* ── Mobile: bottom tab bar, labelled, thumb-reachable ────────────── */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t pb-safe">
-        <div className="flex items-stretch">
-          {NAV.map(({ to, icon: Icon, short, badge }) => (
-            <NavLink key={to} to={to} end={to === '/'}
-              className={({ isActive }) =>
-                `flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 text-[10px] font-medium transition-colors ${
-                  isActive ? 'text-brand-300' : 'text-surface-300'
-                }`}>
-              {({ isActive }) => (<>
-                <span className={`relative flex items-center justify-center w-9 h-6 rounded-md transition-all ${isActive ? 'bg-brand-500/15 shadow-glow-sm' : ''}`}>
-                  <Icon size={17} />
-                  {badge && pending > 0 && (
-                    <span className="absolute -top-1 right-0.5 bg-brand-500 text-white text-[9px] font-semibold rounded-full min-w-[15px] h-[15px] px-1 flex items-center justify-center">
-                      {pending > 9 ? '9+' : pending}
-                    </span>
-                  )}
-                </span>
-                {short}
-              </>)}
-            </NavLink>
-          ))}
-        </div>
       </nav>
     </div>
   );

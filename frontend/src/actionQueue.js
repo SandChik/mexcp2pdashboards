@@ -32,7 +32,7 @@ let items = [];
 let actionableCount = 0;
 let activeByMerchant = {};
 let buyerLogOn = {};          // merchantId -> is the buyer-log/duplicate alert enabled
-let nameIndex = {};           // merchantId -> { normalised KYC name -> [advOrderNo] } — own log + imports (v80)
+let nameIndex = {};           // merchantId -> { normalised KYC name -> [advOrderNo] } — that merchant's chosen sources (v81)
 let nameIndexAt = 0;
 const prevStates = {};        // merchantId -> { advOrderNo: state }
 const prevUnread = {};        // merchantId -> { advOrderNo: unreadCount }
@@ -173,8 +173,8 @@ export async function refreshQueue(opts = {}) {
     // The buyer log is written by the server worker, so this tab never hears
     // about new entries by itself. Refresh periodically or a buyer whose first
     // order completed after page load would never raise the alert.
-    // One index per merchant with the alert on: its own orders + imports only
-    // (v80) — a buyer of merchant A is not a repeat buyer for merchant B.
+    // One index per merchant with the alert on, built from the sources chosen
+    // for it in Settings → Catatan Buyer (server-side; default = itself + imports).
     if (Object.values(buyerLogOn).some(Boolean) && Date.now() - nameIndexAt > 45000) {
       const next = {};
       let ok = true;
@@ -293,6 +293,8 @@ export function removeFromQueue(advOrderNo) {
 
 /** Force a merchant-list refetch (e.g. after adding/removing a merchant). */
 export function resetQueueMerchants() { merchants = []; buyerLogOn = {}; nameIndexAt = 0; }
+/** Settings → Catatan Buyer changed a merchant's sources: re-read the name index on the next pass. */
+export function invalidateNameIndex() { nameIndexAt = 0; }
 
 export function subscribeQueue(fn) {
   listeners.push(fn);

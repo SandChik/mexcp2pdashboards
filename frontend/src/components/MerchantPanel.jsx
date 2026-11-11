@@ -168,10 +168,9 @@ export default function MerchantPanel({ merchant, dateRange, refreshKey, autoRef
 
   // Permanent buyer-name index, source of the duplicate-KYC alert
   const loadNameIndex = useCallback(async () => {
-    // THIS merchant's own orders + manual/imported entries only (v80, by
-    // request): every merchant runs its own event, so a buyer who already
-    // traded with another merchant is still new here. Before v80 this was
-    // all=true (every merchant) — don't switch it back without asking.
+    // The SOURCES chosen for this merchant in Settings → Catatan Buyer (v81;
+    // default = this merchant + imports). The server applies them — never
+    // pass all=true here, that would ignore the operator's choice.
     try { const r = await registryApi.list(merchant.id); setLogNameIndex(r.data?.nameIndex || {}); }
     catch { /* keep last */ }
   }, [merchant.id]);
