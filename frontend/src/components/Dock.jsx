@@ -37,7 +37,7 @@ function Tile({ item }) {
 function Badge({ n, cap }) {
   if (!(n > 0)) return null;
   return (
-    <span className="absolute -top-1 -right-1 z-10 bg-sell text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ring-2 ring-black/70">
+    <span className="absolute -top-1 -right-1 z-10 bg-sell text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ring-2 ring-[#0b1438]">
       {n > cap ? `${cap}+` : n}
     </span>
   );
@@ -77,7 +77,7 @@ function DesktopDock({ pending, onLogout }) {
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   let k = 0; // slot index across groups (logout included)
-  const sep = <span aria-hidden className="w-px h-9 self-center mx-1 bg-white/10" />;
+  const sep = <span aria-hidden className="w-px h-9 self-center mx-1 bg-brand-300/25" />;
 
   return (
     <nav aria-label="Menu utama" onMouseMove={onMove} onMouseLeave={onLeave}
@@ -128,7 +128,7 @@ function MobileDock({ pending }) {
   const n = ITEMS.length;
 
   return (
-    <nav aria-label="Menu utama" className="dock dock-solid md:hidden fixed inset-x-2 bottom-[calc(8px+env(safe-area-inset-bottom))] z-40 p-1.5">
+    <nav aria-label="Menu utama" className="dock dock-solid md:hidden fixed inset-x-2 bottom-[var(--dock-bottom)] z-40 p-1.5">
       <div className="relative flex">
         {idx >= 0 && (
           <span aria-hidden className="dock-pill" style={{ width: `${100 / n}%`, transform: `translateX(${idx * 100}%)` }} />
@@ -151,7 +151,7 @@ function MobileDock({ pending }) {
               </span>
               {/* Same weight in both states: a bolder label would re-layout mid-animation */}
               <span className={`text-[10px] leading-tight font-semibold truncate max-w-full transition-colors duration-200 ${
-                on ? 'text-surface-50' : 'text-surface-300'}`}>{item.short}</span>
+                on ? 'text-white' : 'text-brand-200/60'}`}>{item.short}</span>
             </NavLink>
           );
         })}

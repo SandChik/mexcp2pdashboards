@@ -1,4 +1,4 @@
-// iOS Home-Screen app: un-stick a shrunken viewport (v85).
+// iOS Home-Screen app: un-stick a shrunken viewport (v85, widened v86).
 //
 // The bug (WebKit, iOS 17 → 26, standalone web apps only): after the keyboard
 // closes, or when the app comes back from the background, iOS sometimes leaves
@@ -11,18 +11,37 @@
 // measure the viewport again. So when the height is stuck below what this
 // screen is known to have, hide #root and show it again inside ONE synchronous
 // task (no frame is painted in between, nothing flashes) and put every scroll
-// position back. Runs only in the iOS standalone app, only when the height is
-// actually short, never while someone is typing, and backs off if a flip does
-// not help — so a healthy app never flips at all.
+// position back. From the second try on, also re-apply the viewport <meta>
+// (a second, independent way to make WebKit rebuild its viewport). Runs only in
+// the iOS standalone app, only when the height is actually short, never while
+// someone is typing, and backs off if it does not help — so a healthy app
+// never flips at all.
 
 const SLACK = 4;                        // px of noise we ignore
-const RETRY_MS = [0, 3000, 15000];      // flips per stuck size, then give up until the size changes
+const RETRY_MS = [0, 3000, 15000];      // tries per stuck size, then give up until the size changes
+
+const state = { installed: false, reason: '', tries: 0, lastTry: null, lastResult: '' };
+/** What the guard has seen and done — shown by the "Cek layar" tool in Settings. */
+export function viewportGuardState() { return { ...state }; }
+
+function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+function isStandalone() {
+  // navigator.standalone is the classic iOS flag; the media query is the
+  // standard one and still answers if a future iOS drops the flag.
+  if (navigator.standalone === true) return true;
+  try { return !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); } catch { return false; }
+}
 
 export function installViewportGuard() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  if (window.navigator.standalone !== true) return;          // iOS Home-Screen app only
+  if (!isIOS()) { state.reason = 'bukan iOS'; return; }
+  if (!isStandalone()) { state.reason = 'bukan mode Home Screen'; return; }
   const root = document.getElementById('root');
-  if (!root) return;
+  if (!root) { state.reason = 'tanpa #root'; return; }
+  state.installed = true; state.reason = 'aktif';
 
   const peaks = new Map();   // innerWidth → tallest innerHeight seen at that width
   const scrollers = new Set();
@@ -58,7 +77,16 @@ export function installViewportGuard() {
     if (h > (peaks.get(w) || 0)) peaks.set(w, h);
   };
 
-  function flip() {
+  function reapplyViewportMeta() {
+    const m = document.querySelector('meta[name="viewport"]');
+    if (!m) return;
+    const c = m.getAttribute('content') || '';
+    m.setAttribute('content', `${c}, height=device-height`);
+    void root.offsetHeight;
+    m.setAttribute('content', c);
+  }
+
+  function flip(withMeta) {
     flipping = true;
     const saved = [];
     for (const el of scrollers) {
@@ -70,6 +98,7 @@ export function installViewportGuard() {
     try {
       root.style.display = 'none';
       void root.offsetHeight;          // forced synchronous layout with an empty document
+      if (withMeta) reapplyViewportMeta();
       root.style.display = prev;
       void root.offsetHeight;          // and again with the app back
       for (const [el, top, left] of saved) { el.scrollTop = top; el.scrollLeft = left; }
@@ -85,15 +114,22 @@ export function installViewportGuard() {
     if (flipping || document.visibilityState !== 'visible' || typing()) return;
     note();
     const w = window.innerWidth, h = window.innerHeight;
-    if (expected(w) - h <= SLACK) { stuck = null; return; }
+    if (expected(w) - h <= SLACK) {
+      if (stuck) state.lastResult = `pulih (${h}px)`;
+      stuck = null;
+      return;
+    }
 
     const key = `${w}x${h}`;
     if (!stuck || stuck.key !== key) stuck = { key, tries: 0, at: 0 };
     if (stuck.tries >= RETRY_MS.length) return;                 // gave up for this size
     if (Date.now() - stuck.at < RETRY_MS[stuck.tries]) return;  // backing off
     stuck.tries += 1; stuck.at = Date.now();
-    flip();
+    flip(stuck.tries > 1);
     note();                       // WebKit may already report the real height
+    state.tries += 1;
+    state.lastTry = new Date().toLocaleTimeString('id-ID');
+    state.lastResult = `tinggi ${h}px, seharusnya ${expected(w)}px → sesudah ${window.innerHeight}px (percobaan ${stuck.tries}/${RETRY_MS.length})`;
     // A later `resize` (the usual way the fix arrives) re-runs check().
   }
 
@@ -112,4 +148,5 @@ export function installViewportGuard() {
   // Safety net for the "after a while in the background" variant: reading two
   // numbers every 2 s costs nothing, and it only ever acts when the height is short.
   setInterval(() => { if (!timer) check(); }, 2000);
+  schedule(800);                  // the app may already be stuck when it starts
 }

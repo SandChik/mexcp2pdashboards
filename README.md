@@ -459,6 +459,24 @@ dashboard BingX. Tiga sebab, tiga perbaikan:
   emulasi dengan CPU ×4: berbalik arah 0 kali (dulu 1 kali untuk sorotan dan
   2–3 kali untuk ikon per ketukan).
 
+## v86 — dock lebih turun, nuansa biru, alat Cek layar
+
+- **Dock HP lebih turun.** Dulu jaraknya 8 px + seluruh safe-area bawah (±42pt
+  di iPhone Face ID). Sekarang `--dock-bottom: max(8px, safe-area − 18px)`
+  (±16pt, tepat di atas garis home indicator). `--dock-space` ikut, sehingga
+  area halaman tetap berakhir pas di atas dock.
+- **Warna:** dock (desktop dan HP) berupa kaca biru dengan garis tepi biru,
+  bayangan biru tua, dan sedikit cahaya brand. Tile ikon navy, sorotan HP kaca
+  biru, titik penanda aktif menyala biru, dan tooltip navy.
+- **Penjaga viewport iOS diperluas:** deteksi Home Screen memakai
+  `navigator.standalone` ATAU `(display-mode: standalone)`. Mulai percobaan
+  kedua, `<meta viewport>` juga dipasang ulang, dan penjaga sudah mengecek saat
+  aplikasi dibuka.
+- **Settings → Akun → Cek layar:** overlay berisi ukuran yang dilaporkan iOS
+  (screen, inner, visualViewport, vh/lvh/dvh/svh, safe area, jarak dock) dan
+  status penjaga, plus garis merah/hijau/kuning untuk tiga kandidat "bawah
+  layar". Satu screenshot cukup untuk mendiagnosis dock yang masih meleset.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 

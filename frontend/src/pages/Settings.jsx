@@ -7,8 +7,9 @@ import SoundSettings from '../components/SoundSettings';
 import NotifySettings from '../components/NotifySettings';
 import BuyerLogSettings from '../components/BuyerLogSettings';
 import VersionInfo from '../components/VersionInfo';
+import ScreenCheck from '../components/ScreenCheck';
 import { SectionHeader, Card, Field, inputCls, btnSmGhost } from '../components/ui';
-import { Plus, Trash2, Pencil, Eye, EyeOff, Activity, CheckCircle2, XCircle, Store, BookUser, Bell, MessageSquare, Volume2, User, LogOut } from 'lucide-react';
+import { Plus, Trash2, Pencil, Eye, EyeOff, Activity, CheckCircle2, XCircle, Store, BookUser, Bell, MessageSquare, Volume2, User, LogOut, Smartphone } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { PLATFORMS, platformOf } from '../components/helpers';
 import { invalidateQueueMerchants, refreshQueue } from '../actionQueue';
@@ -235,6 +236,7 @@ function AccountTab() {
   const [form, setForm] = useState({ oldPassword: '', newPassword: '', confirm: '' });
   const [loading, setLoading] = useState(false);
   const [uloading, setUloading] = useState(false);
+  const [screenCheck, setScreenCheck] = useState(false);
   const { login, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -299,6 +301,10 @@ function AccountTab() {
           </form>
         </Card>
       </div>
+      <Card title="Layar HP" action={<button onClick={() => setScreenCheck(true)} className={btnSmGhost}><Smartphone size={13} /> Cek layar</button>}>
+        <p className="text-xs text-surface-300 leading-relaxed">Kalau menu bawah terlihat terlalu tinggi di iPhone, buka ini dan kirim screenshot-nya.</p>
+      </Card>
+      {screenCheck && <ScreenCheck onClose={() => setScreenCheck(false)} />}
       <VersionInfo />
     </div>
   );
