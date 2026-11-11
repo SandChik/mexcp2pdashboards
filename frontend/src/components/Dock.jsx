@@ -37,7 +37,7 @@ function Tile({ item }) {
 function Badge({ n, cap }) {
   if (!(n > 0)) return null;
   return (
-    <span className="absolute -top-1 -right-1 z-10 bg-sell text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ring-2 ring-[#0b1438]">
+    <span className="absolute -top-1 -right-1 z-10 bg-sell text-white text-[10px] font-semibold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center ring-2 ring-surface-800">
       {n > cap ? `${cap}+` : n}
     </span>
   );
@@ -77,7 +77,7 @@ function DesktopDock({ pending, onLogout }) {
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   let k = 0; // slot index across groups (logout included)
-  const sep = <span aria-hidden className="w-px h-9 self-center mx-1 bg-brand-300/25" />;
+  const sep = <span aria-hidden className="w-px h-9 self-center mx-1 bg-surface-700" />;
 
   return (
     <nav aria-label="Menu utama" onMouseMove={onMove} onMouseLeave={onLeave}
@@ -151,7 +151,7 @@ function MobileDock({ pending }) {
               </span>
               {/* Same weight in both states: a bolder label would re-layout mid-animation */}
               <span className={`text-[10px] leading-tight font-semibold truncate max-w-full transition-colors duration-200 ${
-                on ? 'text-white' : 'text-brand-200/60'}`}>{item.short}</span>
+                on ? 'text-brand-300' : 'text-surface-200'}`}>{item.short}</span>
             </NavLink>
           );
         })}

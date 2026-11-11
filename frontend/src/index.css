@@ -65,29 +65,28 @@
   .page-h { height: calc(100dvh - var(--dock-space)); }
 
   /* ── Floating dock (Dock.jsx) ──────────────────────────────────────── */
-  /* v86: blue glass with a deep-navy drop shadow and a faint brand glow,
-     matching the rest of the UI instead of neutral grey. */
+  /* v87: the same material as every .card (surface-800, the faint blue wash
+     at 160deg, surface-700 border). Only the drop shadow is tinted deep navy so
+     the dock still lifts off the page — no bright blue. */
   .dock {
     border-radius: 22px;
-    background: linear-gradient(180deg, rgba(36,58,130,0.55) 0%, rgba(10,18,48,0.80) 100%);
-    border: 1px solid rgba(77,116,255,0.28);
-    box-shadow:
-      inset 0 1px 0 rgba(160,185,255,0.20),
-      0 16px 36px -10px rgba(6,16,70,0.95),
-      0 0 28px -8px rgba(32,80,255,0.40);
-    -webkit-backdrop-filter: blur(24px) saturate(170%);
-    backdrop-filter: blur(24px) saturate(170%);
+    background-color: rgba(7,11,22,0.94);
+    background-image: linear-gradient(160deg, rgba(32,80,255,0.055) 0%, rgba(0,0,0,0) 44%);
+    border: 1px solid #151d33;
+    box-shadow: 0 14px 34px -12px rgba(2,6,28,0.95), 0 0 0 1px rgba(32,80,255,0.06);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
   }
   .dock-tile {
     display: flex; align-items: center; justify-content: center;
     width: 100%; height: 100%;
     border-radius: 23%;
-    box-shadow: 0 4px 10px -4px rgba(4,10,44,0.9);
+    box-shadow: 0 4px 10px -4px rgba(0,0,0,0.85);
   }
   .dock-tile-glyph {
-    color: #dfe7ff;
-    background: linear-gradient(180deg, #2c3f86 0%, #121c45 100%);
-    box-shadow: inset 0 1px 0 rgba(170,195,255,0.24), inset 0 0 0 1px rgba(77,116,255,0.20), 0 4px 10px -4px rgba(4,10,44,0.9);
+    color: #dce4f7;
+    background: linear-gradient(180deg, #121a2e 0%, #0a1020 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 0 0 1px #151d33, 0 4px 10px -4px rgba(0,0,0,0.85);
   }
   .dock-tile-glyph svg { width: 46%; height: 46%; }
 
@@ -107,13 +106,13 @@
   }
   .dock-item:active .dock-lift { filter: brightness(0.75); }
   .dock-item:hover .dock-tile-danger { color: #ff4d6a; }
-  .dock-dot { display: block; width: 4px; height: 4px; margin-top: 5px; border-radius: 9999px; background: #9fb4ff; box-shadow: 0 0 6px rgba(77,116,255,0.9); transition: opacity .2s ease; }
+  .dock-dot { display: block; width: 4px; height: 4px; margin-top: 5px; border-radius: 9999px; background: #4d74ff; box-shadow: 0 0 6px rgba(32,80,255,0.6); transition: opacity .2s ease; }
   .dock-tip {
     pointer-events: none; position: absolute; left: 50%; bottom: calc(var(--s) + 12px);
     transform: translateX(-50%); white-space: nowrap;
     font-size: 12px; color: #f2f5ff; padding: 3px 9px; border-radius: 7px;
-    background: rgba(14,24,64,0.95); border: 1px solid rgba(77,116,255,0.35);
-    box-shadow: 0 6px 16px -6px rgba(6,16,70,0.9);
+    background: #070b16; border: 1px solid #151d33;
+    box-shadow: 0 6px 16px -6px rgba(0,0,0,0.9);
     opacity: 0; transition: opacity .12s ease, bottom .14s cubic-bezier(.25,.8,.25,1);
   }
   .dock-item:hover .dock-tip, .dock-item:focus-visible .dock-tip { opacity: 1; }
@@ -125,13 +124,14 @@
      instead; on this dark UI it looks the same. */
   .dock-solid {
     -webkit-backdrop-filter: none; backdrop-filter: none;
-    background: linear-gradient(180deg, rgba(30,48,112,0.97) 0%, rgba(9,15,42,0.98) 100%);
+    background-color: #070b16;
   }
   .dock-pill {
     will-change: transform;
     position: absolute; top: 0; bottom: 0; left: 0; border-radius: 16px;
-    background: linear-gradient(180deg, rgba(77,116,255,0.42) 0%, rgba(32,80,255,0.16) 100%);
-    box-shadow: inset 0 1px 0 rgba(185,200,255,0.38), inset 0 0 0 1px rgba(125,155,255,0.26), 0 6px 16px -6px rgba(32,80,255,0.8);
+    /* Same language as an active segmented button (.seg-btn-active). */
+    background: rgba(32,80,255,0.15);
+    box-shadow: inset 0 0 0 1px rgba(32,80,255,0.28), 0 0 8px rgba(32,80,255,0.35);
     /* v85: plain ease-out, no overshoot — the old springy curve ran 4–8 px
        past the target and came back, which looked like a wobble. */
     transition: transform .34s cubic-bezier(.25,1,.5,1);

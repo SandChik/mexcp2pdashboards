@@ -477,6 +477,14 @@ dashboard BingX. Tiga sebab, tiga perbaikan:
   status penjaga, plus garis merah/hijau/kuning untuk tiga kandidat "bawah
   layar". Satu screenshot cukup untuk mendiagnosis dock yang masih meleset.
 
+## v87 — dock memakai bahan card
+
+Biru v86 terlalu terang. Dock (desktop dan HP) sekarang memakai bahan yang
+sama dengan `.card`: `surface-800`, sapuan biru 160deg yang tipis, dan garis
+tepi `surface-700`. Bayangannya biru tua redup. Tile ikon dan tooltip berwarna
+surface. Menu aktif di HP memakai bahasa `.seg-btn-active` (`brand-500/15`,
+ring biru tipis, teks `brand-300`).
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 
