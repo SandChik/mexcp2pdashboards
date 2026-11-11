@@ -118,11 +118,17 @@ function DesktopDock({ pending, onLogout }) {
 // ── Phone: labelled dock with a glass highlight that slides to the active item ──
 function MobileDock({ pending }) {
   const { pathname } = useLocation();
-  const idx = ITEMS.findIndex(i => isActive(i.to, pathname));
+  const routeIdx = ITEMS.findIndex(i => isActive(i.to, pathname));
+  // v83: the highlight follows the TAP, not the route. The route only changes
+  // once the new page has rendered (a heavy dashboard takes 100 ms+ on a
+  // phone); waiting for it made the slide stall and then jump.
+  const [tapIdx, setTapIdx] = useState(null);
+  useEffect(() => { setTapIdx(null); }, [pathname]);
+  const idx = tapIdx ?? routeIdx;
   const n = ITEMS.length;
 
   return (
-    <nav aria-label="Menu utama" className="dock md:hidden fixed inset-x-2 bottom-[calc(8px+env(safe-area-inset-bottom))] z-40 p-1.5">
+    <nav aria-label="Menu utama" className="dock dock-solid md:hidden fixed inset-x-2 bottom-[calc(8px+env(safe-area-inset-bottom))] z-40 p-1.5">
       <div className="relative flex">
         {idx >= 0 && (
           <span aria-hidden className="dock-pill" style={{ width: `${100 / n}%`, transform: `translateX(${idx * 100}%)` }} />
@@ -131,16 +137,18 @@ function MobileDock({ pending }) {
           const on = i === idx;
           return (
             <NavLink key={item.to} to={item.to} end={item.to === '/'} aria-label={item.label}
+              onClick={() => setTapIdx(i)}
               className="group relative z-10 flex-1 min-w-0 flex flex-col items-center gap-1 pt-1.5 pb-1">
               <span className={`relative w-8 h-8 transition-transform duration-300 group-active:scale-90 ${on ? 'dock-pop' : ''}`}>
                 {/* Only the icon dims when inactive — the badge stays loud */}
-                <span className={`block w-full h-full transition-[opacity,filter] duration-300 ${on ? '' : 'opacity-60 saturate-[.6]'}`}>
+                <span className={`block w-full h-full transition-opacity duration-200 ${on ? '' : 'opacity-55'}`}>
                   <Tile item={item} />
                 </span>
                 {item.badge && <Badge n={pending} cap={9} />}
               </span>
-              <span className={`text-[10px] leading-tight truncate max-w-full transition-colors duration-300 ${
-                on ? 'text-surface-50 font-semibold' : 'text-surface-300 font-medium'}`}>{item.short}</span>
+              {/* Same weight in both states: a bolder label would re-layout mid-animation */}
+              <span className={`text-[10px] leading-tight font-semibold truncate max-w-full transition-colors duration-200 ${
+                on ? 'text-surface-50' : 'text-surface-300'}`}>{item.short}</span>
             </NavLink>
           );
         })}

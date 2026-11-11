@@ -44,7 +44,10 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      {/* v7_startTransition: route changes render as React transitions — the new
+          page is built in slices, so the phone dock's slide keeps getting frames
+          instead of freezing until a heavy dashboard has mounted (v83). */}
+      <BrowserRouter future={{ v7_startTransition: true }}>
         <AppRoutes />
         <Toaster
           position="bottom-right"

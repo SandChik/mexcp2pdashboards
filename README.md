@@ -413,6 +413,13 @@ Antrian tetap terang), efek tekan. Dock kini dipasang sekali di `App.jsx`
 (`components/Dock.jsx`), bukan di tiap halaman, sehingga tidak dibuat ulang
 saat pindah menu.
 
+v83 — dock HP tidak lagi "ngadat". Sorotan dulu baru bergerak setelah
+halaman baru selesai dibangun (diukur 120–180 ms dengan data berat); sekarang
+sorotan mengikuti ketukan langsung (state sendiri di `Dock.jsx`), navigasi
+dirender sebagai React transition (`BrowserRouter future.v7_startTransition`)
+supaya halaman berat dibangun bertahap, dan dock HP tanpa backdrop blur (mahal
+di GPU HP) dengan sorotan di layer komposit sendiri.
+
 ## Deploy ke VPS
 Lihat panduan lengkap di `deploy/DEPLOY.md` (Tailscale + systemd + worker capture 24/7).
 
