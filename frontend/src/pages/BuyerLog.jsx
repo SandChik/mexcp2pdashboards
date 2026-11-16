@@ -31,7 +31,7 @@ export default function BuyerLog() {
 
   useEffect(() => {
     merchantApi.list().then(r => setMerchants(r.data)).catch(() => {});
-    registryApi.archived().then(r => setArchived(r.data || [])).catch(() => {});
+    registryApi.archived().then(r => setArchived(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
   // A deleted merchant has no alert of its own: like "Manual / Impor", its
   // filter shows just its records (loaded with ?all=true, filtered here).

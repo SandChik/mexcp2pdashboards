@@ -18,6 +18,7 @@ const reply = (url) => {
   if (url.includes('/api/orders') && url.includes('member-ids')) return { map:{} };
   if (url.includes('/api/orders')) return { code:0, data:[] };
   if (url.includes('/api/ads')) return { code:0, data:[] };
+  if (url.endsWith('/api/registry/archived')) return [{ id:'old1', name:'Merchant Lama', platform:'mexc', deletedAt: 1, count: 3 }];
   if (url.includes('/api/registry')) return { records:[], nameIndex:{} };
   if (url.includes('/api/auth/me')) return { user:'admin' };
   if (url.includes('/api/auth')) return { ok:true, isSetup:true };

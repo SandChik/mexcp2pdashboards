@@ -29,7 +29,7 @@ export default function BuyerLogSettings() {
       try {
         const ms = (await merchantApi.list()).data || [];
         setMerchants(ms);
-        registryApi.archived().then(r => setArchived(r.data || [])).catch(() => {});
+        registryApi.archived().then(r => setArchived(Array.isArray(r.data) ? r.data : [])).catch(() => {});
         const rows = await Promise.all(ms.map(async m => {
           try {
             const s = (await merchantApi.getSettings(m.id)).data || {};
