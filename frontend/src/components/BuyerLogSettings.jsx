@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { merchantApi } from '../api';
+import { merchantApi, registryApi } from '../api';
 import { PLATFORMS, platformOf } from './helpers';
 import { SectionHeader, Toggle } from './ui';
 import { invalidateQueueMerchants, invalidateNameIndex } from '../actionQueue';
-import { FileUp } from 'lucide-react';
+import { FileUp, Pencil } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // Imports / manual entries live under this pseudo-merchant id (see captureCore).
@@ -14,9 +14,13 @@ const MANUAL_ID = 'manual';
  * Per merchant: is its buyer log on ("Catat & alert" — the same switch as the
  * panel's ⋮ menu), and WHICH records its "nama sama" alert compares against.
  * Never chosen = the merchant itself + imports.
+ * v88: merchants that were deleted but still own records are offered too
+ * ("· dihapus") — the records outlive the merchant, so they stay usable.
  */
+export const archivedLabel = (a) => a.name || `Merchant #${String(a.id).slice(-6)}`;
 export default function BuyerLogSettings() {
   const [merchants, setMerchants] = useState([]);
+  const [archived, setArchived] = useState([]); // deleted merchants that still own records (v88)
   const [st, setSt] = useState({}); // id -> { buyerLog, sources }
   const [loaded, setLoaded] = useState(false);
 
@@ -25,6 +29,7 @@ export default function BuyerLogSettings() {
       try {
         const ms = (await merchantApi.list()).data || [];
         setMerchants(ms);
+        registryApi.archived().then(r => setArchived(r.data || [])).catch(() => {});
         const rows = await Promise.all(ms.map(async m => {
           try {
             const s = (await merchantApi.getSettings(m.id)).data || {};
@@ -55,6 +60,18 @@ export default function BuyerLogSettings() {
     const sources = cur.includes(src) ? cur.filter(x => x !== src) : [...cur, src];
     save(m.id, { buyerLogSources: sources }, { sources });
   };
+
+  async function renameArchived(a) {
+    const name = window.prompt(`Nama untuk merchant yang sudah dihapus (${a.count} catatan):`, a.name || '');
+    if (name === null) return;
+    const v = name.trim();
+    if (!v) return;
+    try {
+      await merchantApi.renameArchived(a.id, v, a.platform);
+      setArchived(list => list.map(x => x.id === a.id ? { ...x, name: v } : x));
+      toast.success('Nama disimpan');
+    } catch (e) { toast.error(e.response?.data?.error || 'Gagal menyimpan nama'); }
+  }
 
   const chip = (on) =>
     `inline-flex items-center gap-1.5 text-xs rounded-full pl-1 pr-2.5 h-7 border transition-colors ${
@@ -94,6 +111,19 @@ export default function BuyerLogSettings() {
                         </button>
                       );
                     })}
+                    {archived.map(a => (
+                      <span key={a.id} className="inline-flex items-center">
+                        <button onClick={() => toggleSource(m, a.id)} className={chip(s.sources.includes(a.id)) + ' rounded-r-none'}
+                          title={`Merchant sudah dihapus — ${a.count} catatan lamanya masih bisa dipakai, tidak ada data baru`}>
+                          <img src={PLATFORMS[platformOf(a)].logo} alt="" className="w-5 h-5 rounded-full bg-white opacity-60" />
+                          {archivedLabel(a)}<span className="text-surface-300/70">· dihapus</span>
+                        </button>
+                        <button onClick={() => renameArchived(a)} title="Ubah nama"
+                          className="h-7 px-1.5 rounded-r-full border border-l-0 border-surface-700 text-surface-300 hover:text-surface-100 hover:border-surface-600 transition-colors">
+                          <Pencil size={11} />
+                        </button>
+                      </span>
+                    ))}
                     <button onClick={() => toggleSource(m, MANUAL_ID)} className={chip(s.sources.includes(MANUAL_ID))}>
                       <span className="w-5 h-5 rounded-full bg-surface-700 flex items-center justify-center"><FileUp size={11} /></span>
                       Impor / manual

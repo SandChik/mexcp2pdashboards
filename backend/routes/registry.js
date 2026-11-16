@@ -58,6 +58,29 @@ router.delete('/manual/batch/:batchId', authMiddleware, async (req, res) => {
   res.json({ success: true, removed });
 });
 
+// GET /api/registry/archived — merchants that no longer exist but still own
+// buyer-log records (v88): config.archivedMerchants (tombstones written on
+// delete) plus any merchant id found only in the log (deleted before v88 — no
+// name known unless the records carry one). Each: { id, name, platform,
+// deletedAt, count }. Declared BEFORE '/:mid'. Tombstones with no records
+// left are dropped, so the list never shows an empty source.
+router.get('/archived', authMiddleware, (req, res) => {
+  const config = readConfig();
+  const active = new Set((config.merchants || []).map(m => m.id));
+  const byId = {};
+  for (const a of config.archivedMerchants || []) {
+    if (!active.has(a.id)) byId[a.id] = { id: a.id, name: a.name || null, platform: a.platform || 'mexc', deletedAt: a.deletedAt || null, count: 0 };
+  }
+  for (const r of Object.values(readJson(LOG_PATH))) {
+    const id = r && r.merchantId;
+    if (!id || id === MANUAL_MERCHANT_ID || active.has(id)) continue;
+    const a = byId[id] || (byId[id] = { id, name: null, platform: r.platform || 'mexc', deletedAt: null, count: 0 });
+    a.count++;
+    if (!a.name && r.merchantName) a.name = r.merchantName;
+  }
+  res.json(Object.values(byId).filter(a => a.count > 0).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0)));
+});
+
 // GET /api/registry/:mid — the records that merchant's duplicate-name alert
 // compares against: the SOURCES chosen for it in Settings → Catatan Buyer
 // (v81) — merchant ids and/or 'manual' (imports). Never chosen = the merchant

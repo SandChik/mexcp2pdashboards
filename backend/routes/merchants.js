@@ -83,9 +83,36 @@ router.put('/:id', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/merchants/:id
+// v88: the merchant's buyer-log records are NOT deleted with it (they still
+// feed other merchants' "nama sama" alerts), so keep a tombstone — id, name,
+// platform, no API key — in config.archivedMerchants. Settings → Catatan Buyer
+// and the Catatan Buyer page use it to show the name and let the records be
+// chosen as a source. Without it the records would be stranded under a raw id.
 router.delete('/:id', authMiddleware, (req, res) => {
   const config = readConfig();
+  const gone = config.merchants.find(m => m.id === req.params.id);
   config.merchants = config.merchants.filter(m => m.id !== req.params.id);
+  if (gone) {
+    config.archivedMerchants = (config.archivedMerchants || []).filter(a => a.id !== gone.id);
+    config.archivedMerchants.push({ id: gone.id, name: gone.name, platform: platformOf(gone), deletedAt: Date.now() });
+  }
+  writeConfig(config);
+  res.json({ success: true });
+});
+
+// PUT /api/merchants/archived/:id — (re)name a deleted merchant's tombstone.
+// Also creates one for an id that only exists in the buyer log (merchants
+// deleted before v88 left no tombstone, so their name is unknown).
+router.put('/archived/:id', authMiddleware, (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 64);
+  if (!name) return res.status(400).json({ error: 'Nama wajib diisi' });
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(req.params.id)) return res.status(400).json({ error: 'Id tidak valid' });
+  const config = readConfig();
+  if (config.merchants.some(m => m.id === req.params.id)) return res.status(400).json({ error: 'Merchant masih aktif' });
+  const list = config.archivedMerchants || [];
+  const cur = list.find(a => a.id === req.params.id);
+  const platform = PLATFORMS[req.body.platform] ? req.body.platform : (cur && cur.platform) || 'mexc';
+  config.archivedMerchants = [...list.filter(a => a.id !== req.params.id), { ...(cur || { deletedAt: Date.now() }), id: req.params.id, name, platform }];
   writeConfig(config);
   res.json({ success: true });
 });

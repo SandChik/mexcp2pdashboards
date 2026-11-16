@@ -9,6 +9,7 @@ import { BookUser, RefreshCw, Search, Trash2, AlertTriangle, Copy, Download, Plu
 import toast from 'react-hot-toast';
 import { askConfirm } from '../components/confirm';
 import BuyerLogAdd, { downloadTemplate } from '../components/BuyerLogAdd';
+import { archivedLabel } from '../components/BuyerLogSettings';
 
 const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const fmtDate = (ts) => ts ? new Date(ts).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -19,6 +20,7 @@ const MANUAL_ID = 'manual';
 
 export default function BuyerLog() {
   const [merchants, setMerchants] = useState([]);
+  const [archived, setArchived] = useState([]); // deleted merchants that still own records (v88)
   const [merchantSel, setMerchantSel] = useState('all');
   const [records, setRecords] = useState([]);
   const [scopes, setScopes] = useState({}); // merchantId -> sources its alert reads (Settings → Catatan Buyer)
@@ -27,7 +29,13 @@ export default function BuyerLog() {
   const [dupOnly, setDupOnly] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
 
-  useEffect(() => { merchantApi.list().then(r => setMerchants(r.data)).catch(() => {}); }, []);
+  useEffect(() => {
+    merchantApi.list().then(r => setMerchants(r.data)).catch(() => {});
+    registryApi.archived().then(r => setArchived(r.data || [])).catch(() => {});
+  }, []);
+  // A deleted merchant has no alert of its own: like "Manual / Impor", its
+  // filter shows just its records (loaded with ?all=true, filtered here).
+  const isArchivedSel = archived.some(a => a.id === merchantSel);
 
   async function load() {
     if (merchants.length === 0) return;
@@ -38,7 +46,7 @@ export default function BuyerLog() {
       // "Semua" and "Manual / Impor" load everything (?all=true — any merchant
       // id works as anchor) plus every merchant's sources, so duplicates are
       // marked the way each merchant's alert would see them.
-      const one = merchantSel !== 'all' && merchantSel !== MANUAL_ID;
+      const one = merchantSel !== 'all' && merchantSel !== MANUAL_ID && !isArchivedSel;
       const anchor = one ? merchantSel : merchants[0].id;
       const r = await registryApi.list(anchor, !one);
       setRecords(r.data?.records || []);
@@ -48,7 +56,13 @@ export default function BuyerLog() {
   }
   useEffect(() => { load(); }, [merchants, merchantSel]); // eslint-disable-line
 
-  const merchantName = (id) => id === MANUAL_ID ? 'Manual / Impor' : (merchants.find(m => m.id === id)?.name || id);
+  const merchantName = (id, r) => {
+    if (id === MANUAL_ID) return 'Manual / Impor';
+    const m = merchants.find(x => x.id === id);
+    if (m) return m.name;
+    const a = archived.find(x => x.id === id);
+    return (a ? archivedLabel(a) : (r?.merchantName || `Merchant #${String(id).slice(-6)}`)) + ' (dihapus)';
+  };
 
   const { rows, shown, dupNames, uniqueNames } = useMemo(() => {
     // Duplicate = the same name twice inside ONE merchant's scope (the
@@ -62,7 +76,7 @@ export default function BuyerLog() {
       scopeList.forEach(sc => { if (sc.srcs.has(r.merchantId)) sc.counts[k] = (sc.counts[k] || 0) + 1; });
     });
     const scopeCount = (r, k) => scopeList.reduce((n, sc) => sc.srcs.has(r.merchantId) ? Math.max(n, sc.counts[k] || 0) : n, 0);
-    const base = merchantSel === MANUAL_ID ? records.filter(r => r.merchantId === MANUAL_ID) : records;
+    const base = (merchantSel === MANUAL_ID || isArchivedSel) ? records.filter(r => r.merchantId === merchantSel) : records;
     const names = new Set(), dups = new Set();
     let list = base.map(r => {
       if (!r.realName) return { ...r, _dup: false, _dupCount: 0 };
@@ -80,7 +94,7 @@ export default function BuyerLog() {
       (r.advOrderNo || '').toLowerCase().includes(query));
     if (dupOnly) list = list.filter(r => r._dup);
     return { rows: list, shown: base.length, dupNames: dups.size, uniqueNames: names.size };
-  }, [records, scopes, merchantSel, q, dupOnly]);
+  }, [records, scopes, merchantSel, isArchivedSel, q, dupOnly]);
 
   // Recent manual/import batches, derived from the loaded records — lets one bad
   // import be undone in a single click instead of deleting rows one by one.
@@ -119,7 +133,7 @@ export default function BuyerLog() {
     // Excel and fed straight back in.
     downloadCsv(`catatan-buyer-${stamp()}.csv`,
       ['Nama KYC', 'Nickname', 'Merchant', 'Tanggal Selesai', 'Nominal', 'Mata Uang', 'USDT', 'Metode', 'No. Order', 'Catatan', 'Sumber', 'Duplikat'],
-      rows.map(r => [r.realName || '', r.nickName || '', merchantName(r.merchantId),
+      rows.map(r => [r.realName || '', r.nickName || '', merchantName(r.merchantId, r),
         r.doneAt ? new Date(r.doneAt).toISOString().slice(0, 16).replace('T', ' ') : '',
         r.amount, r.fiatUnit || '', r.usdt, r.bank || '', r.advOrderNo, r.note || '',
         r.source || 'order', r._dup ? `ya (${r._dupCount}x)` : 'tidak']));
@@ -143,6 +157,11 @@ export default function BuyerLog() {
                   <option value="all">Semua merchant</option>
                   {merchants.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                   <option value={MANUAL_ID}>Manual / Impor</option>
+                  {archived.length > 0 && (
+                    <optgroup label="Sudah dihapus">
+                      {archived.map(a => <option key={a.id} value={a.id}>{archivedLabel(a)} ({a.count})</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </div>
               <div className="flex-1 min-w-[220px]">
@@ -237,7 +256,7 @@ export default function BuyerLog() {
                       {r.note && <span className="block text-[11px] text-surface-300 mt-0.5 truncate max-w-[220px]" title={r.note}>{r.note}</span>}
                     </td>
                     <td className="px-4 py-2 text-surface-200 truncate max-w-[160px]">{r.nickName || '—'}</td>
-                    <td className="px-4 py-2 text-surface-300 text-xs">{merchantName(r.merchantId)}</td>
+                    <td className="px-4 py-2 text-surface-300 text-xs">{merchantName(r.merchantId, r)}</td>
                     <td className="px-4 py-2 text-surface-200 font-mono text-xs">{fmtDate(r.doneAt)}</td>
                     <td className="px-4 py-2 text-right font-mono text-surface-50">{formatAmount(r.amount, 0)} <span className="text-surface-300 text-xs">{r.fiatUnit}</span></td>
                     <td className="px-4 py-2 text-surface-200 text-xs truncate max-w-[140px]" title={r.bank || ''}>{r.bank || '—'}</td>

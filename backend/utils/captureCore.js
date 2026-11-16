@@ -149,6 +149,7 @@ function captureBuyerLog(merchant, orders, MAX_FETCH = 30) {
       } catch { continue; }
       log[no] = {
         merchantId: merchant.id,
+        merchantName: merchant.name || null, // v88: survives the merchant being deleted
         platform: ['bingx', 'gate'].includes(merchant.platform) ? merchant.platform : 'mexc',
         realName: u.realName || null,
         nickName: u.nickName || null,

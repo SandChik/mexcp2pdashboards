@@ -35,6 +35,7 @@ export const merchantApi = {
   setPauseState: (id, paused, ads) => api.post(`/merchants/${id}/pause-state`, { paused, ads }),
   getSettings: (id) => api.get(`/merchants/${id}/settings`),
   setSettings: (id, settings) => api.post(`/merchants/${id}/settings`, settings),
+  renameArchived: (id, name, platform) => api.put(`/merchants/archived/${id}`, { name, platform }), // v88: deleted merchant's tombstone
   bingxTest: (id, post = false) => api.post(`/merchants/${id}/bingx-test`, { post }),
   gateTest: (id) => api.post(`/merchants/${id}/gate-test`),
   account: (id) => api.get(`/merchants/${id}/account`), // Gate: work/online status
@@ -80,6 +81,7 @@ export const ordersApi = {
 
 export const registryApi = {
   list: (mid, all = false) => api.get(`/registry/${mid}`, { params: all ? { all: 'true' } : {} }),
+  archived: () => api.get('/registry/archived'), // v88: deleted merchants that still own records
   capture: (mid, orders) => api.post(`/registry/${mid}/capture`, { orders }),
   addManual: (records, source = 'manual') => api.post('/registry/manual', { records, source }),
   removeBatch: (batchId) => api.delete(`/registry/manual/batch/${batchId}`),
